@@ -42,7 +42,7 @@ Use one source tree; keep generated archives and extracted releases outside the 
 
 ## Analytics keys
 
-Afterimage can send opt-in gameplay analytics (see `examples/afterimage/README.md`). Never commit
+Afterimage can send gameplay analytics (see `examples/afterimage/README.md`). Never commit
 an ingest key or an `analytics.config.lua`; both are refused by review and the latter is
 gitignored. The release tools write the config from `RAVENSIGHT_PUBLIC_KEY` at build time, so a
 fork and every local build are keyless and send nothing. For a local test, copy

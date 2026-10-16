@@ -3,8 +3,8 @@
 -- is passed in, so tests run without LÖVE.
 --
 -- The format is one `key=value` per line and is parsed, never executed, so a
--- hand-edited or damaged file can only fall back to defaults. The analytics
--- choice is not kept here: the Ravensight SDK owns it (`ravensight_optin`).
+-- hand-edited or damaged file can only fall back to defaults. Analytics has
+-- no setting here: it is always on in official builds (README.md, "Analytics").
 local M = {}
 
 M.FILE = "settings.txt"

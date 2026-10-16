@@ -17,6 +17,11 @@ assert(bad.art == "illustrated" and bad.muted == false, "bad values keep default
 assert(bad.music == 0.85 and bad.effects == 0.85 and bad.unknown == nil)
 assert(settings.parse(nil).art == "illustrated" and settings.parse(42).music == 0.85)
 
+-- Analytics is always on and has no setting: a stray key is ignored and never written.
+local stray = settings.parse("analytics=false\nart=vector\n")
+assert(stray.analytics == nil and stray.art == "vector", "no analytics setting")
+assert(not settings.serialize(stray):find("analytics"), "settings.txt never names analytics")
+
 -- Round trip, fixed order, two decimals for volumes.
 local text = settings.serialize({
   art = "vector",

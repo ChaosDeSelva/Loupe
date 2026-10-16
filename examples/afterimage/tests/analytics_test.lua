@@ -1,6 +1,6 @@
 -- The analytics contract (schema_version 1), without LÖVE: every event, its
 -- exact property keys, rs_kind, the place rule, pause-free timers, the
--- modified flag, automation labels, the exit mailbox and the opt-in gate.
+-- modified flag, automation labels, the exit mailbox and the collection gate.
 local analytics = require("src.analytics")
 local sim = require("src.sim")
 local play = require("tests.pilot")
@@ -170,7 +170,8 @@ local function count(h, name)
   return n
 end
 
--- 1. Opt-in gate: with the SDK not collecting, nothing is tracked at all.
+-- 1. Collection gate: with the SDK not collecting (keyless, the server's kill
+-- switch, a refused key, or the SDK's own opt-out file), nothing is tracked.
 do
   local h = harness({ enabled = false })
   local g = sim.new(42)
@@ -179,14 +180,12 @@ do
   play(g)
   h.a:observe(g)
   h.a:quit("flight")
-  assert(#h.sent == 0, "nothing leaves before the player opts in")
+  assert(#h.sent == 0, "nothing leaves while the SDK is not collecting")
 end
 
--- 1b. A player who opts in later gets one session_started, at the yes.
+-- 1b. One session_started per launch, however often it is asked.
 do
-  local h = harness({ enabled = false })
-  h.a:sessionStarted({ art = "vector" })
-  h.enabled = true
+  local h = harness()
   h.a:sessionStarted({ art = "vector" })
   h.a:sessionStarted({ art = "vector" })
   assert(#h.sent == 1 and h.sent[1].name == "session_started", "one session start per launch")
@@ -340,7 +339,7 @@ do
   assert(h.sent[#h.sent].name == "session_ended", "the session ends last")
 end
 
--- 5. The web exit mailbox: kept current, cleared on quit and on opt-out.
+-- 5. The web exit mailbox: kept current, cleared on quit and when collection stops.
 do
   local h = harness({ mailbox = true, distribution = "web-pages" })
   h.a:sessionStarted({ art = "vector" })
@@ -372,99 +371,37 @@ do
   assert(h.mailboxText ~= "stale", "refreshed with current times")
   h.enabled = false
   h.a:refreshMailbox()
-  assert(h.mailboxText == nil, "opting out removes the mailbox")
+  assert(h.mailboxText == nil, "a stop in collection removes the mailbox")
   h.enabled = true
   h.a:refreshMailbox()
   h.a:quit("flight")
   assert(h.mailboxText == nil, "a clean quit removes the mailbox")
 end
 
--- 5b. A yes in the middle of a run: that run stays unobserved, and run-scoped
--- events resume at the next run_started. So does a gap in consent.
+-- 5b. Always on: every run is reported while the SDK collects, and a stop
+-- in collection mid-run (the server's kill switch) stops sending at once.
 do
-  local h = harness({ enabled = false, mailbox = true })
+  local h = harness({ mailbox = true })
+  h.a:sessionStarted({ art = "vector" })
   local g = sim.new(42)
   h.a:runStarted(g)
-  h.a:update(5, true, false)
-  h.enabled = true -- the yes, from the pause screen
-  h.a:sessionStarted({ art = "vector" })
   play(g)
   h.a:update(30, true, false)
   h.a:observe(g)
+  local list = json.decode(h.mailboxText)
+  assert(#list == 2 and list[1].event == "run_abandoned", "the run in progress is in the mailbox")
+  assert(count(h, "run_started") == 1 and count(h, "sector_completed") == 1, "the run is reported")
+  local sent = #h.sent
+  h.enabled = false
   local cost = sim.cost(g, "power")
   if sim.buy(g, "power") then
     h.a:upgradePurchased(g, "power", cost)
   end
-  local list = json.decode(h.mailboxText)
-  assert(#list == 1 and list[1].event == "session_ended", "no abandon entry for an unobserved run")
   h.a:quit("dock")
+  assert(#h.sent == sent, "nothing is sent once the SDK stops collecting")
   for _, e in ipairs(h.sent) do
     check(e)
-    assert(not EXPECTED[e.name].run, "no run-scoped event from a run that began before the yes")
   end
-  assert(h.sent[#h.sent].data.runs_started == 0 and h.sent[#h.sent].data.sectors_completed == 0)
-
-  local k = harness()
-  k.a:runStarted(sim.new(5))
-  k.enabled = false
-  k.a:update(1, true, false) -- switched off mid-run
-  k.enabled = true
-  k.a:update(1, true, false)
-  k.a:quit("flight")
-  assert(count(k, "run_abandoned") == 0, "a run with a gap in consent stays unreported")
-  k.a:runStarted(sim.new(6))
-  assert(count(k, "run_started") == 2, "the next run is observed again")
-end
-
--- 5c. The switch shows the player's choice, not whether events flow. Real
--- SDK core: the server's settings answer is trackingEnabled false.
-do
-  local Core = require("lib.ravensight.core")
-  local files = { [Core.OPTIN_FILE] = "1" }
-  local storage = {
-    read = function(name)
-      return files[name]
-    end,
-    write = function(name, text)
-      files[name] = text
-    end,
-    remove = function(name)
-      files[name] = nil
-    end,
-  }
-  local requests = {}
-  local core = Core.new({
-    apiUrl = "http://127.0.0.1:9",
-    ingestKey = "gt_pub_unit_test",
-    send = function(req, callback)
-      requests[#requests + 1] = req.url
-      if req.url:match("/settings$") then
-        callback(200, '{"trackingEnabled":false}', {})
-      else
-        callback(0, "", {})
-      end
-    end,
-    storage = storage,
-    randomHex = function(n)
-      return string.rep("a", n * 2)
-    end,
-    consent = "opt_in",
-  })
-  core:start()
-  assert(core:isTrackingEnabled() == false, "the server's kill switch stops collection")
-  local switch = analytics.consentSwitch({
-    saved = function()
-      return files[Core.OPTIN_FILE] ~= nil
-    end,
-    set = function(on)
-      core:setTrackingEnabled(on)
-    end,
-  })
-  assert(switch.isOn() == true, "the switch still shows the player's yes")
-  assert(switch.toggle() == false and files[Core.OPTIN_FILE] == nil, "and can withdraw it")
-  assert(switch.isOn() == false)
-  assert(switch.toggle() == true and files[Core.OPTIN_FILE] ~= nil, "a new yes is saved")
-  assert(#requests >= 1 and requests[1]:match("/settings$"), "the settings check was asked")
 end
 
 -- 6. Automation labels, platform names and the injected config.
@@ -517,4 +454,4 @@ do
   assert(not ok, "keys outside the allowlist are refused")
 end
 
-print("PASS: analytics contract, 12 events, opt-in gate, timers, modified, mailbox, config")
+print("PASS: analytics contract, 12 events, collection gate, timers, modified, mailbox, config")

@@ -20,11 +20,11 @@ Building the upload (from the repository root):
 
 The zip's index.html contains the Ravensight public key by design (distribution "web-itch").
 It is a public, write-only key with its own event allowlist and limits; anyone can read it from
-the page, and it can be paused or revoked in Ravensight. The game inside is keyless and sends
-nothing until the player switches ANALYTICS on. On an itch.io page the game runs in an iframe,
-where the browser may block storage: the player's choice then lasts for that visit only.
+the page, and it can be paused or revoked in Ravensight. The game inside is keyless; the page
+sends anonymous play stats from the moment the player presses Play, and the game's title screen
+says so in one line. There is no in-game switch.
 Use the Afterimage.love from site/downloads (built with the key) and the source zip (never has
 one). Without RAVENSIGHT_PUBLIC_KEY the build is keyless and sends nothing.
 
-Suggested page note: "Optional, off by default: switch ANALYTICS on in the game to send anonymous
-play stats (sectors, upgrades, deaths) to the developer."
+Suggested page note: "This game sends anonymous play stats, sectors, upgrades and deaths, to the
+developer."

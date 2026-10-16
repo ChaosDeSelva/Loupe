@@ -16,12 +16,12 @@
 <script>
 // Analytics. The build writes the public key here from RAVENSIGHT_PUBLIC_KEY; a
 // fork or a local build has none, and then the bridge is a sink: the game runs
-// the same and nothing is sent. Nothing is sent before the player switches
-// ANALYTICS on inside the game either, and the page's SDK is not even
-// constructed until then (no device id stored, no request). The game's save
-// folder owns the choice: the page starts its SDK only on the game's own
-// "enabled true" line and never reads or writes the choice in localStorage,
-// which every page on this origin shares.
+// the same and nothing is sent. With a key, analytics is always on (disclosed
+// on the game's title screen): the page starts its SDK when the player presses
+// Play, without waiting for any line from the game. The game's opt-out line
+// ("enabled false"), printed only when the SDK's own opt-out file exists in the
+// save folder, still stops all sending. The page never reads or writes a
+// choice in localStorage, which every page on this origin shares.
 const RAVENSIGHT_PUBLIC_KEY='{{RAVENSIGHT_PUBLIC_KEY}}';
 const RAVENSIGHT_API_URL='{{RAVENSIGHT_API_URL}}';
 const AFTERIMAGE_VERSION='{{AFTERIMAGE_VERSION}}';
@@ -52,31 +52,22 @@ function fit(){
   canvas.dataset.renderSize=size;
   canvas.style.width='100%';canvas.style.height='100%';
 }
-// A client that constructs the SDK at the player's first yes. The bridge only
-// calls these members (ravensight-love 0.3.0 with ravensight-js 0.4.x).
-function lazyRavensight(make){
-  let rs=null, starting=null;
-  return {
-    // True from the first init() call, so a second "enabled true" line never
-    // starts a second settings check and session.
-    get initialized(){return Boolean(starting)||(rs?rs.initialized:false);},
-    get _inflightSize(){return rs?rs._inflightSize:0;},
-    track(event,data){return rs?rs.track(event,data):undefined;},
-    submitFeedback(...args){return rs?rs.submitFeedback(...args):Promise.resolve(false);},
-    setEnabled(value){if(value&&!rs)rs=make();if(rs)rs.setEnabled(value);},
-    init(){if(!rs)return Promise.resolve(null);if(!starting)starting=rs.init();return starting;},
-    flush(){return rs?rs.flush():Promise.resolve(0);},
-    _flushOnHidden(offset){if(!rs)return false;return typeof rs._flushOnHidden==='function'?rs._flushOnHidden(offset):rs.flush();}
-  };
+// The bridge calls init() again if the game ever prints "enabled true"; one
+// settings check and one session per page, however often it is asked.
+function initOnce(rs){
+  const start=rs.init.bind(rs);
+  let starting=null;
+  rs.init=()=>starting||(starting=start());
+  return rs;
 }
 function silenceTaggedLines(){
   const print=Module.print||console.log.bind(console);
   Module.print=(...args)=>{if(args.length===1&&typeof args[0]==='string'&&args[0].startsWith('__RAVENSIGHT__ '))return;return print(...args);};
 }
 // love.js copies the save directory to IndexedDB only on beforeunload, which a
-// closing tab may not finish. Copy it as soon as the player's analytics choice
-// (written by the game before it prints the line) or a setting changes hands,
-// and whenever the tab is hidden, so the choice survives the next visit.
+// closing tab may not finish. Copy it whenever the tab is hidden, and after an
+// SDK "enabled" line (its file is written before the line), so settings and
+// any opt-out survive the next visit.
 function persistSaves(){try{if(Module.FS&&Module.FS.syncfs)Module.FS.syncfs(false,error=>{if(error)console.warn('Save sync failed:',error);});}catch(error){}}
 // The game prints its first tagged line from love.load, which love.js runs only
 // after the save folder was loaded from IndexedDB. Before that, a sync would
@@ -94,7 +85,7 @@ function watchChoiceLines(){
   };
 }
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&savesLoaded)persistSaves();});
-let bridgeReady=null;
+let bridgeReady=null, client=null;
 function prepareAnalytics(){
   if(bridgeReady)return bridgeReady;
   bridgeReady=(async()=>{
@@ -104,9 +95,9 @@ function prepareAnalytics(){
     const {default:Ravensight}=await import('./ravensight/index.js');
     const options={ingestKey:key,gameVersion:AFTERIMAGE_VERSION};
     if(/^https?:\/\//.test(RAVENSIGHT_API_URL))options.apiUrl=RAVENSIGHT_API_URL;
-    const client=lazyRavensight(()=>new Ravensight(options));
-    // storage: null keeps the bridge off localStorage; the game's line decides.
-    bridge.installRavensightBridge(client,Module,{consent:'opt_in',storage:null});
+    client=initOnce(new Ravensight(options));
+    // storage: null keeps the bridge off localStorage; the game's save folder decides.
+    bridge.installRavensightBridge(client,Module,{consent:'opt_out',storage:null});
     return 'live';
   })().catch(error=>{
     console.warn('Analytics unavailable:',error&&error.message);
@@ -128,6 +119,7 @@ async function launch(fullscreen){
   started=true;start.hidden=true;full.hidden=false;
   // The bridge must wrap Module.print before Love(Module) reads it.
   await prepareAnalytics();
+  if(client)Promise.resolve(client.init()).catch(error=>console.warn('Analytics unavailable:',error&&error.message));
   watchChoiceLines();
   Love(Module);canvas.focus();
   // The initial LÖVE window setup follows runtime initialization; settle both on the next frames.

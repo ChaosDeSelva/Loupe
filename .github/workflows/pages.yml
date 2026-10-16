@@ -35,7 +35,7 @@ jobs:
           python3 tools/build_showcase.py --builder .webtools/node_modules/.bin/love.js
       - name: Audit built artifacts for keys
         run: python3 tools/audit_release.py --artifact site/play site/downloads
-      - name: Browser smoke (consent before any request)
+      - name: Browser smoke (requests from the keyed and keyless pages)
         env:
           HAS_KEY: ${{ secrets.RAVENSIGHT_PUBLIC_KEY != '' }}
         # With the secret: the keyed page, then a copy of it with the key blanked,

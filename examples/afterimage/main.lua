@@ -23,7 +23,8 @@ local loupe
 local playtest = false
 local playtestTime = 0
 -- Analytics: the Ravensight SDK only when a release tool injected a config
--- (analytics.config.lua); otherwise nil, no toggle, nothing sent. See README.md.
+-- (analytics.config.lua); otherwise nil and nothing sent. Always on when
+-- present, disclosed on the title screen. See README.md.
 local ravensight
 local track
 local prefs
@@ -81,14 +82,6 @@ local function buy(kind)
   end
   return false
 end
-local consent
-local function analyticsOn()
-  return consent ~= nil and consent.isOn()
-end
-local function toggleAnalytics()
-  consent.toggle()
-  track:sessionStarted(currentSettings())
-end
 local function writeMailbox(text)
   -- love.js keeps /tmp in its in-memory file system; the page's bridge reads
   -- it on pagehide. love.filesystem cannot write there, so plain io is used.
@@ -117,19 +110,12 @@ local function startAnalytics(args)
       ingestKey = config.ingestKey,
       apiUrl = config.apiUrl,
       gameVersion = version.version,
-      consent = "opt_in",
+      consent = "opt_out",
       optional = true,
       distribution = config.distribution,
       transport = browserBuild and "web" or nil,
     })
     sdk = ravensight
-    local optin = require("lib.ravensight.core").OPTIN_FILE
-    consent = analytics.consentSwitch({
-      saved = function()
-        return love.filesystem.getInfo(optin) ~= nil
-      end,
-      set = ravensight.setTrackingEnabled,
-    })
   end
   track = analytics.new({
     sdk = sdk,
@@ -550,16 +536,13 @@ local function field()
   art.color("muted", 0.35)
   lg.rectangle("line", f.x, f.y, f.w, f.h, 3, 3)
 end
--- The player's analytics switch and what it does, in one line. Shown only in
--- builds that can send (a release or web config); a source checkout has none.
-local DISCLOSURE = "Sends anonymous play stats (sectors, upgrades, deaths) "
-  .. "to the developer while ON."
-local function analyticsToggle(x, y)
-  if not ravensight then
-    return
+-- What the game sends, in one line on the title screen. Shown only in builds
+-- that can send (a release or web config); a source checkout has none.
+local DISCLOSURE = "Sends anonymous play stats, sectors, upgrades and deaths, to the developer."
+local function analyticsDisclosure(x, y)
+  if ravensight then
+    art.text(DISCLOSURE, x, y, 11, "muted")
   end
-  button("analytics", analyticsOn() and "ANALYTICS: ON" or "ANALYTICS: OFF", x, y, 230, 40)
-  art.text(DISCLOSURE, x, y + 50, 11, "muted")
 end
 local function overlay()
   if screen == "flight" and not paused then
@@ -596,7 +579,7 @@ local function overlay()
       12,
       "muted"
     )
-    analyticsToggle(145, 716)
+    analyticsDisclosure(145, 716)
   elseif paused then
     art.text("HOLDING PATTERN", 280, 338, 39)
     art.text("Take your time. The stars can wait.", 280, 400, 17, "muted")
@@ -620,7 +603,6 @@ local function overlay()
     )
     button("fxdown", "−", 440, 650, 50, 42)
     button("fxup", "+", 500, 650, 50, 42)
-    analyticsToggle(280, 712)
   elseif screen == "lost" then
     art.text("SIGNAL LOST", 200, 315, 49, "orange")
     art.text("Every good pilot starts with a few bad flights.", 200, 390, 17, "muted")
@@ -779,9 +761,7 @@ function love.draw()
 end
 local function action(id)
   focusedButton = nil
-  if id == "analytics" then
-    toggleAnalytics()
-  elseif id == "art" then
+  if id == "art" then
     art.illustrated = not art.illustrated
     track:artStyleChanged(art.illustrated, "button")
   elseif id == "musicdown" then

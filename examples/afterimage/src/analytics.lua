@@ -3,9 +3,12 @@
 -- the random source and Loupe's edit counter are passed in, so the contract
 -- below is tested without LÖVE (tests/analytics_test.lua).
 --
--- Off unless the player turns it on (the SDK runs with consent = "opt_in"),
--- and inert in any build without an injected config: a clone of this
--- repository sends nothing. See README.md, "Analytics".
+-- On in official builds, disclosed on the title screen (the SDK runs with
+-- consent = "opt_out" and the game has no switch), and inert in any build
+-- without an injected config: a clone of this repository sends nothing. The
+-- SDK can still stop collecting on its own (the server's kill switch, a
+-- refused key, or its saved opt-out file), and then nothing is sent. See
+-- README.md, "Analytics".
 --
 -- Contract, schema_version 1. Every event carries the COMMON keys; the events
 -- inside a run also carry the RUN keys. `level` is only ever the place,
@@ -13,11 +16,6 @@
 -- count play time only: a paused game, the Loupe clock stopped, the title and
 -- end screens do not count. `wall_time_s` is real time and appears only on
 -- session_ended.
---
--- A run is observed only if analytics was on when it started and stayed on.
--- A yes in the middle of a run leaves that run unobserved: its run-scoped
--- events are never sent, and they resume at the next run_started, so no
--- event ever reports play from before the player agreed.
 local M = {}
 
 M.SCHEMA_VERSION = 1
@@ -156,25 +154,6 @@ function M.usesMailbox(os)
   return os == "Web"
 end
 
--- The ANALYTICS switch shows and flips the player's own choice, read from
--- where the SDK saves it, never whether events are flowing: after the
--- server's kill switch or a refused key the SDK stops sending, but the
--- player's yes still stands and must still be withdrawable.
---   saved()  true when the player's yes is on disk
---   set(on)  the SDK's setTrackingEnabled
-function M.consentSwitch(deps)
-  local switch = {}
-  function switch.isOn()
-    return deps.saved() == true
-  end
-  function switch.toggle()
-    local on = not switch.isOn()
-    deps.set(on)
-    return on
-  end
-  return switch
-end
-
 -- Reads the injected build config: a Lua file returning a table, written only
 -- by the release tools. Returns nil when there is none or it is unusable.
 -- loader(name) returns a chunk or nil (love.filesystem.load in the game).
@@ -245,12 +224,6 @@ function M:nextId()
   return "x" .. self.nonce .. "-" .. self.idCounter
 end
 
--- The run in progress, when it is being reported; nil otherwise.
-function M:observedRun()
-  local run = self.run
-  return run and run.observed and run or nil
-end
-
 function M:active()
   return self.deps.sdk.enabled() == true
 end
@@ -291,7 +264,7 @@ function M:send(name, data)
   if not self:active() then
     return
   end
-  if M.EVENTS[name].run and not self:observedRun() then
+  if M.EVENTS[name].run and not self.run then
     return
   end
   self.deps.sdk.track(name, self:payload(name, data))
@@ -311,7 +284,7 @@ function M:refreshMailbox()
     return
   end
   local list = {}
-  local run = self:observedRun()
+  local run = self.run
   if run then
     local data = self:abandonData("closed")
     data.rs_event_id = run.exitId
@@ -329,9 +302,6 @@ end
 --- is being played and not paused, `docked` while the dock screen is open.
 function M:update(dt, flying, docked)
   local run = self.run
-  if run and run.observed and not self:active() then
-    run.observed = false -- a gap in consent: the rest of this run is not reported
-  end
   if run and (flying or docked) then
     run.time = run.time + dt
     if flying then
@@ -346,8 +316,7 @@ function M:update(dt, flying, docked)
   end
 end
 
---- Once per launch, at start or at the player's first yes, whichever comes
---- first while collecting.
+--- Once per launch, at start, when the SDK is collecting.
 function M:sessionStarted(settings)
   if self.sessionSent or not self:active() then
     self:refreshMailbox()
@@ -363,11 +332,10 @@ end
 
 --- A new run, story or endless; `game` is its first sector.
 function M:runStarted(game)
-  if self:observedRun() and self:active() then
+  if self.run and self:active() then
     self.deps.sdk.track("run_abandoned", self:abandonData("restart"))
   end
   self.run = {
-    observed = self:active(),
     exitId = self:nextId(),
     id = hex(self.deps.random, 12),
     mode = game.endless and "endless" or "story",
@@ -376,9 +344,7 @@ function M:runStarted(game)
     cleared = 0,
     game = nil,
   }
-  if self.run.observed then
-    self.runsStarted = self.runsStarted + 1
-  end
+  self.runsStarted = self.runsStarted + 1
   self:send("run_started", {})
   self:sectorStarted(game)
 end
@@ -449,9 +415,7 @@ function M:observe(game)
     return
   end
   run.cleared = run.cleared + 1
-  if run.observed then
-    self.sectorsCompleted = self.sectorsCompleted + 1
-  end
+  self.sectorsCompleted = self.sectorsCompleted + 1
   self:send("sector_completed", {
     level = "sector_" .. game.sector,
     sector = game.sector,
@@ -465,9 +429,7 @@ function M:observe(game)
     boss_defeated = game.bossDefeated == true,
   })
   if state == "victory" then
-    if run.observed then
-      self.runsCompleted = self.runsCompleted + 1
-    end
+    self.runsCompleted = self.runsCompleted + 1
     self:send("run_completed", {
       sectors_cleared = run.cleared,
       run_time_s = round(run.time),
@@ -538,7 +500,7 @@ end
 --- `screen` names where the player left from ("flight", "paused", "dock").
 function M:quit(screen)
   if self:active() then
-    if self:observedRun() then
+    if self.run then
       self.deps.sdk.track("run_abandoned", self:abandonData(screen))
     end
     self.deps.sdk.track("session_ended", self:endData())

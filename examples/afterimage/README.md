@@ -73,7 +73,7 @@ Loupe can inspect the plain Lua state you expose around those systems.
 - `src/sprites.lua`, `src/physics.lua`: small reusable rendering/collision helpers.
 - `main.lua`: input, screen flow, HUD and shop. Rendering does not change the simulation.
 
-- `src/analytics.lua`, `src/settings.lua`, `src/version.lua`: opt-in gameplay analytics, saved
+- `src/analytics.lua`, `src/settings.lua`, `src/version.lua`: gameplay analytics, saved
   preferences, and the game's version (see "Analytics" below).
 
 Run `luajit tests/sim_test.lua`, `luajit tests/run_test.lua`, `luajit tests/assets_test.lua`,
@@ -92,18 +92,18 @@ defaults. Runs started with an automation flag (`--smoke`, `--playtest`, `--capt
 
 The official builds can send a small set of anonymous gameplay events to the developer through
 [Ravensight](https://ravensight.io), using the vendored ravensight-love SDK (`lib/ravensight/`,
-version in `lib/ravensight/VERSION`). Nothing is sent unless the player switches
-**ANALYTICS: ON** on the title or pause screen; the line under the switch says what it sends. The
-choice is saved (`ravensight_optin` in the save directory) and can be switched off the same way;
-the switch always shows that saved choice, even while the server has paused collection. A run
-already in progress when the player says yes is never reported: run events start with the next
-run.
+version in `lib/ravensight/VERSION`). In an official build analytics is always on, and the title
+screen says so in one line: "Sends anonymous play stats, sectors, upgrades and deaths, to the
+developer." There is no in-game switch. The SDK runs with `consent = "opt_out"`, so it still stops
+on its own when the server pauses collection, when the key is refused, or when its own opt-out
+file (`ravensight_optout`) is in the save directory, and then nothing is sent. Every run is
+reported while the SDK is collecting.
 
 **No key in this repository.** The game starts the SDK only when an `analytics.config.lua` is
 present, and only the release tools write one, from the `RAVENSIGHT_PUBLIC_KEY` environment
 variable at build time. The file is gitignored; `analytics.config.example.lua` shows its shape. A
 clone, a fork, `love examples/afterimage` and `tools/build.sh` without a release flag have no
-config: the switch is hidden and the game sends nothing (it still saves `settings.txt` when a
+config: the disclosure is hidden and the game sends nothing (it still saves `settings.txt` when a
 setting changes). The key is a public `gt_pub_` key:
 it can only write events within the allowlist and limits set for it, and it can be paused or
 revoked from Ravensight. A `gt_live_` key is refused by the build.
@@ -117,17 +117,19 @@ revoked from Ravensight. A `gt_live_` key is refused by the build.
 
 In a web build the game itself is keyless; the page holds the key and its Ravensight JavaScript
 SDK (`ravensight` 0.4.2 from npm, copied beside `index.html`) does the sending through
-`ravensight-love-bridge.js`. The game's save directory owns the choice: the page constructs that
-SDK only when the game reports the player's yes, keeps nothing about it in `localStorage`, and a
-page built without a key installs the bridge as a sink. When the tab closes, the bridge
+`ravensight-love-bridge.js`. The page starts that SDK when the player presses Play, keeps nothing
+in `localStorage`, and still honours the game's `enabled false` line (printed only when the SDK's
+opt-out file exists in the save directory). A page built without a key installs the bridge as a
+sink. When the tab closes, the bridge
 sends the run's last state from an in-memory mailbox the game keeps current.
 
 From the repository root, `python3 tools/audit_release.py --artifact site/play site/downloads`
 checks built artifacts:
 a key may appear only in a native `.love`'s `analytics.config.lua` and a web `index.html`, and
 never in the source zip. `node tools/smoke_web.mjs site/play --expect key|keyless` drives the
-web build in Chromium against a local mock API: no request before the switch, then exactly a
-settings check and a session.
+web build in Chromium against a local mock API: no request before Play, then exactly a settings
+check and a session before the first event batch, and the exit mailbox; a keyless page sends
+nothing.
 
 ### Event contract (schema_version 1)
 

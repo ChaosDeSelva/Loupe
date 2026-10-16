@@ -1,4 +1,4 @@
-# 0011: Opt-in analytics in a public game, with no key in the source
+# 0011: Analytics in a public game, with no key in the source
 
 - Status: accepted
 - Date: 2026-10-15
@@ -17,13 +17,24 @@ must decide before anything is sent. Loupe's own library (`loupe/`) must stay de
 - The SDK starts only when `analytics.config.lua` exists. That file is gitignored and written
   only by the release tools from the `RAVENSIGHT_PUBLIC_KEY` environment variable (a repository
   secret in CI). The tools accept only a public `gt_pub_` key; a source zip never gets one.
-- Consent is opt-in on every build: the SDK runs with `consent = "opt_in"` and the player's
-  ANALYTICS switch is the only way on. A web page does not construct its SDK before that yes.
+- Consent was opt-in on every build (superseded on 2026-10-15, see below): the SDK ran with
+  `consent = "opt_in"` and the player's ANALYTICS switch was the only way on.
 - The web game is keyless; the page holds the key. Without a key the page installs the bridge
   as a sink, so the game behaves the same and sends nothing.
 - The event contract is versioned (`schema_version` 1) and asserted key by key in
   `tests/analytics_test.lua`; automation flags label events `synthetic`.
 - `tools/audit_release.py --artifact` and `tools/smoke_web.mjs` gate the Pages deploy.
+
+## Decision, 2026-10-15: always on in official builds
+At the owner's request the ANALYTICS switch is removed. Official builds (the ones the release
+tools give a key) always send the twelve events, and the title screen discloses it in one line:
+"Sends anonymous play stats, sectors, upgrades and deaths, to the developer." The SDK runs with
+`consent = "opt_out"` and the game never calls `setTrackingEnabled`, so collection still stops on
+the server's kill switch, a refused key, or the SDK's own opt-out file. The web page starts its
+SDK when the player presses Play instead of waiting for a yes, and still honours the game's
+`enabled false` line. Keyless forks and development builds are unchanged: no config, no
+disclosure, nothing sent. Every run is reported while the SDK collects, so the unobserved-run rule
+is gone. `settings.txt` never held the choice and is unchanged.
 
 ## Consequences
 - A clone, a fork and every development build send nothing, with no code path to disable.

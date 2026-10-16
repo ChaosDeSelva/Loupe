@@ -2,7 +2,7 @@
 """Package a built .love for love.js 11.4.1 compatibility mode, without changing native source.
 
 Analytics: the .love inside gets a keyless analytics.config.lua naming the
-distribution (the game then shows its ANALYTICS toggle); any config already in
+distribution (the game then shows its analytics disclosure); any config already in
 the archive is dropped. The public key, when RAVENSIGHT_PUBLIC_KEY is set, goes
 only into the page. Without it the page installs the bridge as a sink and
 sends nothing. The bridge and the ravensight JavaScript SDK (pinned below) are
