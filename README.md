@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔍 Loupe
+![Loupe — Pixel Worlds Under Glass](docs/media/loupe-banner.png)
 
 ### Tiny lens. Big “aha!” energy.
 
