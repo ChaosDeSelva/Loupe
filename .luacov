@@ -1,0 +1,10 @@
+return {
+  include = { "^loupe/" },
+  exclude = {
+    -- Drawing and panel glue need a real LÖVE window; the CI smoke job covers them.
+    "^loupe/ui/render_love$",
+    "^loupe/panels/",
+  },
+  statsfile = "luacov.stats.out",
+  reportfile = "luacov.report.out",
+}

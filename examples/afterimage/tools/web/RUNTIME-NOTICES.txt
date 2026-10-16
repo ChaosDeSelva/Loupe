@@ -1,0 +1,19 @@
+Afterimage browser runtime notes
+
+Built from the love.js 11.4.1 npm package in compatibility mode.
+Upstream: https://github.com/Davidobot/love.js
+Upstream license notices are preserved in the accompanying LICENSE files.
+
+Local changes made by the exporter:
+- Replace the stock HTML/CSS player with Afterimage's accessible launch screen.
+- Expose the Emscripten virtual filesystem as Module.FS for a viewport-size mailbox.
+- When Module.htmlFullscreen is enabled, prevent SDL mode changes from exiting
+  HTML fullscreen. Browser Escape and the page's F11/fullscreen controls still exit.
+
+The packaged Lua reads this virtual size file and calls love.window.updateMode.
+No host filesystem is exposed to the browser. These pinned-runtime patches use
+exact anchor assertions and must be reviewed if the upstream runtime is upgraded.
+
+Local modification: canvas mouse coordinates and relative motion are mapped from CSS pixels to LÖVE logical pixels using the canvas size and display DPI.
+
+Local modification: upstream compiler home-directory prefixes in WASM diagnostic strings are replaced with equal-length anonymous build paths; byte offsets are unchanged.

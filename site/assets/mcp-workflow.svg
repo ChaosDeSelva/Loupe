@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 370" role="img" aria-labelledby="title desc">
+<title id="title">AI and human editing workflow</title><desc id="desc">A local AI client uses MCP to edit source and build a LÖVE game. The game exposes live state through Loupe. Both AI and human edits share undo history.</desc>
+<rect width="1200" height="370" rx="20" fill="#0b151e"/>
+<g font-family="sans-serif" fill="#dfeef2"><text x="42" y="55" font-size="15" fill="#7de3d0">LOCAL WORKFLOW / ARCHITECTURE DIAGRAM</text>
+<g fill="#142a35" stroke="#42606b"><rect x="40" y="95" width="250" height="150" rx="12"/><rect x="340" y="95" width="250" height="150" rx="12"/><rect x="640" y="95" width="250" height="150" rx="12"/><rect x="940" y="95" width="220" height="150" rx="12"/></g>
+<g text-anchor="middle"><text x="165" y="143" font-size="24">AI client</text><text x="465" y="143" font-size="24">Local MCP server</text><text x="765" y="143" font-size="24">LÖVE + Loupe</text><text x="1050" y="143" font-size="24">You, in F1</text>
+<g font-size="16" fill="#a8c1cd"><text x="165" y="182">Describe the change</text><text x="165" y="208">Review the result</text><text x="465" y="182">Read · write · build</text><text x="465" y="208">Inspect · edit · capture</text><text x="765" y="182">Running game state</text><text x="765" y="208">Pause · step · undo</text><text x="1050" y="182">Tweak live values</text><text x="1050" y="208">Keep the good stuff</text></g>
+<g font-size="30" fill="#7de3d0"><text x="315" y="180">↔</text><text x="615" y="180">↔</text><text x="915" y="180">↔</text></g></g>
+<text x="42" y="310" font-size="19">One running game. Shared undo history. Human control throughout.</text>
+<text x="42" y="340" font-size="14" fill="#a8c1cd">MCP is opt-in on desktop. Browser players can use the Loupe overlay without enabling an AI bridge.</text></g></svg>

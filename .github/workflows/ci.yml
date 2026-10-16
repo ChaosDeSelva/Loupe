@@ -1,0 +1,75 @@
+name: ci
+
+# tools/ci-docker.sh runs the same steps locally in an ubuntu:24.04 container.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gates:
+    name: gates (${{ matrix.lua }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # LÖVE ships LuaJIT; plain 5.1 keeps us off LuaJIT-only extensions by accident.
+        lua: ["luajit-2.1", "5.1"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: leafo/gh-actions-lua@v13
+        with:
+          luaVersion: ${{ matrix.lua }}
+      - uses: leafo/gh-actions-luarocks@v6
+      - name: Install rocks
+        run: luarocks install busted && luarocks install luacheck && luarocks install luacov
+      - name: Install StyLua
+        uses: JohnnyMorganz/stylua-action@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: v2.5.2
+          args: --version
+      - name: Run gates
+        # gh-actions-lua links `lua` to luajit for LuaJIT builds.
+        run: LUA=lua ./tools/check.sh
+
+  mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python3 tools/audit_release.py
+      - run: python3 -m unittest discover -s mcp -p "test_*.py"
+
+  smoke:
+    name: love smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install LÖVE and a virtual display
+        run: sudo apt-get update && sudo apt-get install -y love xvfb
+      - name: Run each example unattended
+        run: |
+          love --version
+          for game in examples/*/; do
+            # examples/shared is a library; LÖVE would idle on its no-game screen.
+            [ -f "$game/main.lua" ] || continue
+            echo "== $game"
+            SDL_AUDIODRIVER=dummy ALSOFT_DRIVERS=null timeout 120 xvfb-run -a love "$game" --smoke 120
+          done
+      - name: Build portable examples
+        run: ./tools/build.sh
+      - name: Smoke-test packaged examples
+        run: |
+          for game in dist/*.love; do
+            SDL_AUDIODRIVER=dummy ALSOFT_DRIVERS=null timeout 120 xvfb-run -a love "$game" --smoke 120
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loupe-examples
+          path: dist/*.love

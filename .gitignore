@@ -1,0 +1,34 @@
+luacov.stats.out
+luacov.report.out
+lua_modules/
+.luarocks/
+*.love
+.DS_Store
+loupe_overrides.lua
+.claude/
+dist/
+
+# Extracted releases and local archives are not source.
+/d/
+/*.zip
+
+__pycache__/
+*.pyc
+.loupe-backups/
+
+# Rebuilt from examples/afterimage; not canonical source.
+/site/play/
+/site/downloads/
+.webtools/
+
+# Local credentials must never enter source releases.
+.env
+.env.*
+!.env.example
+.aws/
+.ssh/
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519

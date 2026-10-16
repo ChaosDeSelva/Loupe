@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#04090d"><title>Afterimage · The Glass Reach</title>
+<link rel="stylesheet" href="theme/love.css">
+</head>
+<body>
+<canvas id="canvas" tabindex="0" aria-label="Afterimage game. WASD or arrows move; Space pulse; Tab pause; V switches art; M mutes sound."></canvas>
+<section id="start" aria-label="Start Afterimage">
+<img src="afterimage-logo.png" alt="Afterimage: The Glass Reach">
+<div><button id="launch" disabled>Loading flight systems…</button></div>
+<p id="status" role="status">Preparing flight systems…</p>
+</section>
+<button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen (F11)" hidden>⛶</button>
+<script>
+const canvas=document.getElementById('canvas');
+const start=document.getElementById('start');
+const status=document.getElementById('status');
+const full=document.getElementById('fullscreen');
+let started=false, runtimeReady=false;
+let pixelBudget=2560*1440, sampleStart=0, frameCount=0, slowSamples=0;
+var Module={
+  htmlFullscreen:true, arguments:['./game.love'], INITIAL_MEMORY:268435456, canvas,
+  printErr:console.error.bind(console),
+  setStatus(text){if(text)status.textContent=text;},
+  monitorRunDependencies(left){status.textContent=left?'Loading game assets…':'Ready for launch';},
+  onRuntimeInitialized(){runtimeReady=true; requestAnimationFrame(fit);}
+};
+function fit(){
+  if(!started||!runtimeReady||!Module.setCanvasSize)return;
+  // Bound total fill cost on large Retina displays while preserving the aspect ratio.
+  const ratio=Math.min(window.devicePixelRatio||1,2,Math.sqrt(pixelBudget/(window.innerWidth*window.innerHeight)));
+  const w=Math.max(1,Math.round(window.innerWidth*ratio));
+  const h=Math.max(1,Math.round(window.innerHeight*ratio));
+  const size=w+' '+h;
+  if(Module.FS&&Module.lastWindowSize!==size){
+    Module.FS.writeFile('/tmp/afterimage-window.txt',size);
+    Module.lastWindowSize=size;
+  }
+  canvas.dataset.renderSize=size;
+  canvas.style.width='100%';canvas.style.height='100%';
+}
+function unlockAudio(){const context=Module.SDL2&&Module.SDL2.audioContext;if(context&&context.state==='suspended')context.resume();}
+async function toggleFullscreen(){
+  try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}
+  catch(error){status.textContent='Fullscreen unavailable here. Open the game in its own tab.';}
+  fit();canvas.focus();
+}
+async function launch(fullscreen){
+  if(started)return;
+  if(fullscreen)await toggleFullscreen();
+  started=true;start.hidden=true;full.hidden=false;
+  Love(Module);canvas.focus();
+  // The initial LÖVE window setup follows runtime initialization; settle both on the next frames.
+  function settle(now){
+    if(!sampleStart)sampleStart=now;
+    frameCount++;
+    if(now-sampleStart>=1000){
+      const fps=frameCount*1000/(now-sampleStart);
+      canvas.dataset.frameRate=Math.round(fps);
+      slowSamples=!document.hidden&&fps<45?slowSamples+1:0;
+      if(slowSamples>=3&&pixelBudget>1440*900){
+        pixelBudget=Math.max(1440*900,Math.round(pixelBudget*.75));
+        slowSamples=0;
+      }
+      frameCount=0;sampleStart=now;fit();
+    }
+    requestAnimationFrame(settle);
+  }requestAnimationFrame(settle);
+  unlockAudio();
+}
+function applicationLoad(){
+  document.getElementById('launch').disabled=false;document.getElementById('launch').textContent='Play';
+  status.textContent='';
+}
+document.getElementById('launch').onclick=()=>launch(false);
+full.onclick=toggleFullscreen;
+window.addEventListener('resize',fit);
+document.addEventListener('fullscreenchange',fit);
+window.addEventListener('pointerdown',unlockAudio);
+// Restore keyboard ownership when returning to the embedded canvas.
+canvas.addEventListener('pointerdown',()=>canvas.focus({preventScroll:true}));
+window.addEventListener('focus',()=>{if(started)canvas.focus({preventScroll:true});});
+window.addEventListener('keydown',event=>{
+  unlockAudio();
+  if(event.key==='F11'){event.preventDefault();event.stopImmediatePropagation();toggleFullscreen();}
+  else if((event.key==='Tab'&&document.activeElement===canvas)||[' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))event.preventDefault();
+},true);
+canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();start.hidden=false;status.textContent='Graphics context lost. Reload to restart.';});
+window.addEventListener('error',()=>{start.hidden=false;status.textContent='The game could not start. Reload or try the native download.';});
+</script>
+<script src="game.js"></script><script async src="love.js" onload="applicationLoad()"></script>
+</body></html>

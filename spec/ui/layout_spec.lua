@@ -1,0 +1,71 @@
+local layout = require("loupe.ui.layout")
+
+describe("ui.layout", function()
+  local l
+  before_each(function()
+    l = layout.new(10, 20, 100, 4)
+  end)
+
+  it("stacks rows vertically, filling the width by default", function()
+    assert.same({ 10, 20, 100, 18 }, { l:place(nil, 18) })
+    assert.same({ 10, 42, 100, 18 }, { l:place(nil, 18) })
+  end)
+
+  it("keeps a requested width", function()
+    assert.same({ 10, 20, 30, 18 }, { l:place(30, 18) })
+  end)
+
+  it("places the next item to the right after sameLine", function()
+    l:place(30, 18)
+    l:sameLine()
+    assert.same({ 44, 20, 30, 18 }, { l:place(30, 18) })
+    l:sameLine()
+    -- Fill-width items take whatever is left on the row.
+    assert.same({ 78, 20, 32, 18 }, { l:place(nil, 18) })
+    assert.same({ 10, 42, 100, 18 }, { l:place(nil, 18) })
+  end)
+
+  it("uses the tallest item on a shared row", function()
+    l:place(30, 10)
+    l:sameLine()
+    l:place(30, 30)
+    local _, y = l:place(nil, 10)
+    assert.equal(54, y)
+  end)
+
+  it("indents and unindents", function()
+    l:indent(12)
+    assert.same({ 22, 20, 88, 18 }, { l:place(nil, 18) })
+    l:unindent(12)
+    assert.same({ 10, 42, 100, 18 }, { l:place(nil, 18) })
+  end)
+
+  it("wraps a sameLine item that doesn't fit onto a new row", function()
+    l:place(60, 18)
+    l:sameLine()
+    assert.same({ 10, 42, 50, 18 }, { l:place(50, 18) })
+  end)
+
+  it("never wraps the first item of a row, even when too wide", function()
+    assert.same({ 10, 20, 150, 18 }, { l:place(150, 18) })
+  end)
+
+  it("puts the next item flush right on the current row", function()
+    l:place(30, 18)
+    l:alignRight(25)
+    assert.same({ 85, 20, 25, 18 }, { l:place(25, 18) })
+  end)
+
+  it("starts a new row when right-aligned items would overlap the row", function()
+    l:place(90, 18)
+    l:alignRight(25)
+    assert.same({ 85, 42, 25, 18 }, { l:place(25, 18) })
+  end)
+
+  it("reports content height without trailing spacing", function()
+    assert.equal(0, l:height())
+    l:place(nil, 18)
+    l:place(nil, 18)
+    assert.equal(40, l:height())
+  end)
+end)

@@ -1,0 +1,13 @@
+AFTERIMAGE: The Glass Reach
+A free space shooter. A live game-development playground.
+
+Dodge, collect salvage, bolt on extra lasers, and dive back into the stars.
+Take a short three-sector run or keep flying in Endless mode. Press F1 to open Loupe,
+the live inspector behind the game: change your ship, undo an experiment, keep playing.
+
+Upload afterimage-itch-html5.zip as an HTML game. Enable fullscreen and use a 960 × 600
+viewport with “Click to launch”. Keyboard and mouse required; desktop browsers recommended.
+Set the price to free. Also offer Afterimage.love and afterimage-source.zip as downloads.
+Controls: WASD/arrows move, Space pulse, Tab pause, M sound, F1 inspector.
+
+This is a first playable release. Balance feedback is welcome, especially for later Endless cycles.

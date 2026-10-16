@@ -1,0 +1,7 @@
+ravensight-love 0.3.0
+Vendored from tag v0.3.0 (commit a00f06a) of
+https://github.com/Reality-Software-Entertainment/ravensight-love
+
+Files: ravensight/*.lua and LICENSE, unchanged, here as lib/ravensight/;
+web/ravensight-love-bridge.js, unchanged, as tools/web/ravensight-love-bridge.js.
+Do not edit these files here: change them upstream, tag, and copy them again.
