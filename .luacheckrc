@@ -5,7 +5,7 @@ codes = true
 
 -- .claude/ holds agent worktrees: full copies of the repo with their own checks.
 -- examples/afterimage/lib/ is vendored ravensight-love, checked by its own repo.
-exclude_files = { "lua_modules/", ".luarocks/", ".claude/", "examples/afterimage/lib/" }
+exclude_files = { "lua_modules/", ".luarocks/", ".lua/", ".webtools/", ".claude/", "examples/afterimage/lib/" }
 
 -- The library may read `love`, but never define globals. (core/ must not
 -- touch `love` at all; tools/check.sh enforces that with a grep.)

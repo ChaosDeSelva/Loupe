@@ -2,3 +2,5 @@
 lua_modules/
 .luarocks/
 examples/afterimage/lib/
+.lua/
+.webtools/

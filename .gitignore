@@ -36,3 +36,4 @@ id_ed25519
 # Analytics config is written by the release tools from RAVENSIGHT_PUBLIC_KEY at
 # build time. Never commit one: a fork must stay keyless.
 analytics.config.lua
+.lua/
