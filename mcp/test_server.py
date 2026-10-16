@@ -33,6 +33,7 @@ class ServerTests(unittest.TestCase):
     def test_build_excludes_private_state(self):
         (self.root/'.env').write_text('private')
         (self.root/'loupe_overrides.lua').write_text('private')
+        (self.root/'analytics.config.lua').write_text('return { ingestKey = "gt_pub_x" }')
         self.s.call('project_write',{'path':'main.lua','content':'return 2'})
         result=self.s.call('game_build',{})
         with zipfile.ZipFile(result['artifact']) as z: self.assertEqual(z.namelist(),['main.lua'])

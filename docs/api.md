@@ -95,6 +95,7 @@ chain with it.
 | `loupe.isAttached()` | boolean | `false` before `attach`, after `detach`, and in headless runs. |
 | `loupe.isOpen()` | boolean | Whether the overlay is visible. `false` when not attached. |
 | `loupe.setOpen(open)` | nothing | Shows or hides the overlay. Ignored when not attached; call it from `love.load` or later, after `attach` has run. |
+| `loupe.editRevision()` | number | `0` while detached. Non-zero once Loupe has changed game state in this process: an inspector, world or MCP edit, an undo or redo, or saved overrides applied at attach; grows with every change. |
 | `loupe.watch(target, name)` | `target` | See below. |
 | `loupe.unwatch(name)` | nothing | Stops showing the root called `name`. Unknown names are ignored. |
 | `loupe._VERSION` | string | `"major.minor.patch"`. |

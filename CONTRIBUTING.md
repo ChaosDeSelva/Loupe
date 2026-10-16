@@ -40,11 +40,23 @@ Add regression tests for behavior changes. Coverage gates require 90% for core a
 
 Use one source tree; keep generated archives and extracted releases outside the repository.
 
+## Analytics keys
+
+Afterimage can send opt-in gameplay analytics (see `examples/afterimage/README.md`). Never commit
+an ingest key or an `analytics.config.lua`; both are refused by review and the latter is
+gitignored. The release tools write the config from `RAVENSIGHT_PUBLIC_KEY` at build time, so a
+fork and every local build are keyless and send nothing. For a local test, copy
+`analytics.config.example.lua` to `analytics.config.lua` with a key for a test environment.
+`python3 tools/audit_release.py` flags a key in source; `--artifact PATH ...` checks built games.
+`examples/afterimage/lib/ravensight/` is vendored: change it upstream and copy it again.
+
 ## Website
 
 The `pages.yml` workflow deploys only `site/` to GitHub Pages on pushes to `main`.
 Enable **Settings → Pages → Source → GitHub Actions**. Preview locally with
-`python3 -m http.server 8000 --directory site`.
+`python3 -m http.server 8000 --directory site`. The workflow passes the optional
+`RAVENSIGHT_PUBLIC_KEY` repository secret to the build, audits the artifacts for keys, and runs
+`tools/smoke_web.mjs` (Playwright, Chromium) against the web build before uploading.
 
 AI-assisted contributions are welcome and held to the same checks. Describe what changed,
 why, and what you actually tested in your pull request.

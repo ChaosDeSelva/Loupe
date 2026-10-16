@@ -14,6 +14,17 @@
 </section>
 <button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen (F11)" hidden>⛶</button>
 <script>
+// Analytics. The build writes the public key here from RAVENSIGHT_PUBLIC_KEY; a
+// fork or a local build has none, and then the bridge is a sink: the game runs
+// the same and nothing is sent. Nothing is sent before the player switches
+// ANALYTICS on inside the game either, and the page's SDK is not even
+// constructed until then (no device id stored, no request). The game's save
+// folder owns the choice: the page starts its SDK only on the game's own
+// "enabled true" line and never reads or writes the choice in localStorage,
+// which every page on this origin shares.
+const RAVENSIGHT_PUBLIC_KEY='{{RAVENSIGHT_PUBLIC_KEY}}';
+const RAVENSIGHT_API_URL='{{RAVENSIGHT_API_URL}}';
+const AFTERIMAGE_VERSION='{{AFTERIMAGE_VERSION}}';
 const canvas=document.getElementById('canvas');
 const start=document.getElementById('start');
 const status=document.getElementById('status');
@@ -41,6 +52,70 @@ function fit(){
   canvas.dataset.renderSize=size;
   canvas.style.width='100%';canvas.style.height='100%';
 }
+// A client that constructs the SDK at the player's first yes. The bridge only
+// calls these members (ravensight-love 0.3.0 with ravensight-js 0.4.x).
+function lazyRavensight(make){
+  let rs=null, starting=null;
+  return {
+    // True from the first init() call, so a second "enabled true" line never
+    // starts a second settings check and session.
+    get initialized(){return Boolean(starting)||(rs?rs.initialized:false);},
+    get _inflightSize(){return rs?rs._inflightSize:0;},
+    track(event,data){return rs?rs.track(event,data):undefined;},
+    submitFeedback(...args){return rs?rs.submitFeedback(...args):Promise.resolve(false);},
+    setEnabled(value){if(value&&!rs)rs=make();if(rs)rs.setEnabled(value);},
+    init(){if(!rs)return Promise.resolve(null);if(!starting)starting=rs.init();return starting;},
+    flush(){return rs?rs.flush():Promise.resolve(0);},
+    _flushOnHidden(offset){if(!rs)return false;return typeof rs._flushOnHidden==='function'?rs._flushOnHidden(offset):rs.flush();}
+  };
+}
+function silenceTaggedLines(){
+  const print=Module.print||console.log.bind(console);
+  Module.print=(...args)=>{if(args.length===1&&typeof args[0]==='string'&&args[0].startsWith('__RAVENSIGHT__ '))return;return print(...args);};
+}
+// love.js copies the save directory to IndexedDB only on beforeunload, which a
+// closing tab may not finish. Copy it as soon as the player's analytics choice
+// (written by the game before it prints the line) or a setting changes hands,
+// and whenever the tab is hidden, so the choice survives the next visit.
+function persistSaves(){try{if(Module.FS&&Module.FS.syncfs)Module.FS.syncfs(false,error=>{if(error)console.warn('Save sync failed:',error);});}catch(error){}}
+// The game prints its first tagged line from love.load, which love.js runs only
+// after the save folder was loaded from IndexedDB. Before that, a sync would
+// overwrite the stored folder with an empty one.
+let savesLoaded=false;
+function watchChoiceLines(){
+  const print=Module.print;
+  Module.print=(...args)=>{
+    const text=args[0];
+    const tagged=typeof text==='string'&&text.startsWith('__RAVENSIGHT__ ');
+    if(tagged)savesLoaded=true;
+    const result=print(...args);
+    if(tagged&&text.includes('"op":"enabled"'))setTimeout(persistSaves,0);
+    return result;
+  };
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&savesLoaded)persistSaves();});
+let bridgeReady=null;
+function prepareAnalytics(){
+  if(bridgeReady)return bridgeReady;
+  bridgeReady=(async()=>{
+    const bridge=await import('./ravensight-love-bridge.js');
+    const key=/^gt_pub_[A-Za-z0-9_-]{16,64}$/.test(RAVENSIGHT_PUBLIC_KEY)?RAVENSIGHT_PUBLIC_KEY:'';
+    if(!key){bridge.installRavensightBridge(null,Module);return 'sink';}
+    const {default:Ravensight}=await import('./ravensight/index.js');
+    const options={ingestKey:key,gameVersion:AFTERIMAGE_VERSION};
+    if(/^https?:\/\//.test(RAVENSIGHT_API_URL))options.apiUrl=RAVENSIGHT_API_URL;
+    const client=lazyRavensight(()=>new Ravensight(options));
+    // storage: null keeps the bridge off localStorage; the game's line decides.
+    bridge.installRavensightBridge(client,Module,{consent:'opt_in',storage:null});
+    return 'live';
+  })().catch(error=>{
+    console.warn('Analytics unavailable:',error&&error.message);
+    silenceTaggedLines();
+    return 'failed';
+  });
+  bridgeReady.then(mode=>{document.documentElement.dataset.analytics=mode;});
+  return bridgeReady;
+}
 function unlockAudio(){const context=Module.SDL2&&Module.SDL2.audioContext;if(context&&context.state==='suspended')context.resume();}
 async function toggleFullscreen(){
   try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}
@@ -51,6 +126,9 @@ async function launch(fullscreen){
   if(started)return;
   if(fullscreen)await toggleFullscreen();
   started=true;start.hidden=true;full.hidden=false;
+  // The bridge must wrap Module.print before Love(Module) reads it.
+  await prepareAnalytics();
+  watchChoiceLines();
   Love(Module);canvas.focus();
   // The initial LÖVE window setup follows runtime initialization; settle both on the next frames.
   function settle(now){
@@ -71,6 +149,7 @@ async function launch(fullscreen){
   unlockAudio();
 }
 function applicationLoad(){
+  prepareAnalytics();
   document.getElementById('launch').disabled=false;document.getElementById('launch').textContent='Play';
   status.textContent='';
 }

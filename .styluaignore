@@ -1,3 +1,4 @@
 .claude/
 lua_modules/
 .luarocks/
+examples/afterimage/lib/

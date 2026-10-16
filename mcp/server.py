@@ -45,7 +45,7 @@ TOOLS = [
     tool('asset_import', 'Copy an image/audio/font from the explicitly configured asset inbox into assets/. Existing files are never overwritten.', schema({'source': STR, 'path': STR}, ['source', 'path'])),
     tool('game_capabilities', 'Read supported authoring workflows, reusable runtime helpers and platform limits.', schema(), True),
     tool('loupe_screenshot', 'Capture the running game window as a PNG image.', schema(), True),
-    tool('game_build', 'Package the configured LÖVE project as dist/game.love, excluding local state and metadata.', schema()),
+    tool('game_build', 'Package the configured LÖVE project as dist/game.love, excluding local state, metadata and any analytics config.', schema()),
     tool('game_launch', 'Launch the configured local game. Source is executable; use only on a trusted project.', schema({'smoke_frames': {'type': 'integer', 'minimum': 1, 'maximum': 36000}})),
     tool('game_stop', 'Stop only the game process launched by this MCP server.', schema()),
 ]
@@ -238,7 +238,8 @@ class Server:
             if template == 'afterimage':
                 example = library.parent / 'examples' / 'afterimage'
                 shutil.copytree(example, self.project, dirs_exist_ok=True,
-                                ignore=shutil.ignore_patterns('dist', '.*', '__pycache__', '*.pyc', 'loupe_overrides.lua'))
+                                ignore=shutil.ignore_patterns('dist', '.*', '__pycache__', '*.pyc', 'loupe_overrides.lua',
+                                                              'analytics.config.lua'))
                 config = self.project / 'conf.lua'
                 config.write_text(config.read_text().replace('afterimage-first-flight', 'loupe-' + uuid.uuid4().hex))
                 return {'created': str(self.project), 'template': template,
@@ -256,7 +257,8 @@ class Server:
                     rel = p.relative_to(self.project)
                     if not p.is_file() or p.is_symlink(): continue
                     if any(x.startswith('.') or x in BLOCKED or x in {'tests','mcp','tools'} for x in rel.parts): continue
-                    if p.name == 'loupe_overrides.lua' or p.suffix in {'.love','.zip','.log','.pyc'}: continue
+                    # An analytics config is injected by the release tools only, never by a dev build.
+                    if p.name in {'loupe_overrides.lua','analytics.config.lua'} or p.suffix in {'.love','.zip','.log','.pyc'}: continue
                     archive.write(p, str(rel));count += 1
                 library = Path(__file__).resolve().parent.parent / 'loupe'
                 if self.project.parent == library.parent / 'examples' and not (self.project / 'loupe').exists():

@@ -1,19 +1,53 @@
 #!/usr/bin/env python3
-"""Package a built .love for love.js 11.4.1 compatibility mode, without changing native source."""
+"""Package a built .love for love.js 11.4.1 compatibility mode, without changing native source.
+
+Analytics: the .love inside gets a keyless analytics.config.lua naming the
+distribution (the game then shows its ANALYTICS toggle); any config already in
+the archive is dropped. The public key, when RAVENSIGHT_PUBLIC_KEY is set, goes
+only into the page. Without it the page installs the bridge as a sink and
+sends nothing. The bridge and the ravensight JavaScript SDK (pinned below) are
+copied beside index.html.
+"""
 import argparse
 import hashlib
+import json
 import re
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 
-parser=argparse.ArgumentParser(description=__doc__)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import analytics_config  # noqa: E402
+
+# The ravensight npm package the page loads. 0.4.x is what ravensight-love
+# 0.3.0's bridge needs; bump together with the bridge.
+RAVENSIGHT_JS_VERSION='0.4.2'
+
+parser=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument('game',type=Path)
 parser.add_argument('output',type=Path)
 parser.add_argument('--builder',default='love.js')
+parser.add_argument('--distribution',required=True,choices=('web-pages','web-itch'))
+parser.add_argument('--js-sdk',type=Path,help='the installed ravensight npm package directory '
+                    '(default: beside the love.js builder in node_modules)')
 args=parser.parse_args()
+key=analytics_config.public_key()
+api_url=analytics_config.api_url()
+sdk_dir=args.js_sdk
+if sdk_dir is None and Path(args.builder).parent.name=='.bin':
+    sdk_dir=Path(args.builder).parent.parent/'ravensight'
+sdk_source=None
+if sdk_dir is not None and (sdk_dir/'package.json').is_file():
+    found=json.loads((sdk_dir/'package.json').read_text()).get('version')
+    if found!=RAVENSIGHT_JS_VERSION:
+        raise SystemExit(f'ravensight JS SDK {found} found, {RAVENSIGHT_JS_VERSION} pinned: install ravensight@{RAVENSIGHT_JS_VERSION}')
+    sdk_source=sdk_dir/'src/index.js'
+if key and sdk_source is None:
+    raise SystemExit('RAVENSIGHT_PUBLIC_KEY is set but the ravensight JS SDK was not found; pass --js-sdk')
+game_version='1.0.0'
 with tempfile.TemporaryDirectory() as directory:
     game=Path(directory)/'web.love'
     with zipfile.ZipFile(args.game) as source, zipfile.ZipFile(game,'w',zipfile.ZIP_DEFLATED) as dest:
@@ -23,12 +57,23 @@ with tempfile.TemporaryDirectory() as directory:
                 data=data.replace(b't.version = "11.5"',b't.version = "11.4"')
             if info.filename=='main.lua':
                 data=data.replace(b'local browserBuild = false', b'local browserBuild = true')
+            if info.filename==analytics_config.NAME:
+                continue
+            if info.filename=='src/version.lua':
+                match=re.search(rb'version = "([0-9A-Za-z.+-]+)"',data)
+                if match: game_version=match.group(1).decode()
             dest.writestr(info,data)
+        dest.writestr(analytics_config.NAME,analytics_config.render(args.distribution,web=True))
     subprocess.run([args.builder,'-c','-t','AFTERIMAGE / The Glass Reach','-m','268435456',str(game),str(args.output)],check=True)
 template=Path(__file__).parent/'web'
 shutil.copy2(template/'index.html',args.output/'index.html')
 shutil.copy2(template/'love.css',args.output/'theme/love.css')
 for notice in template.glob('*.txt'): shutil.copy2(notice,args.output/notice.name)
+shutil.copy2(template/'ravensight-love-bridge.js',args.output/'ravensight-love-bridge.js')
+if sdk_source is not None:
+    (args.output/'ravensight').mkdir(exist_ok=True)
+    shutil.copy2(sdk_source,args.output/'ravensight/index.js')
+    shutil.copy2(sdk_source.parent.parent/'LICENSE',args.output/'ravensight/LICENSE')
 print(args.output.resolve())
 
 logo=Path(__file__).resolve().parents[1]/'assets/afterimage-logo.png'
@@ -61,6 +106,14 @@ loader_code=loader_code.replace("var REMOTE_PACKAGE_BASE = 'game.data';", "var R
 loader.write_text(loader_code)
 page=args.output/'index.html'
 html=page.read_text()
+html=html.replace('{{RAVENSIGHT_PUBLIC_KEY}}',key).replace('{{RAVENSIGHT_API_URL}}',api_url)
+html=html.replace('{{AFTERIMAGE_VERSION}}',game_version)
+assert '{{' not in html, 'unreplaced template token in index.html'
+for name in ['ravensight-love-bridge.js','ravensight/index.js']:
+    if (args.output/name).exists():
+        digest=hashlib.sha256((args.output/name).read_bytes()).hexdigest()[:16]
+        html=html.replace("import('./"+name+"')","import('./"+name+"?v="+digest+"')")
+print('Analytics:', 'public key in the page ('+args.distribution+')' if key else 'keyless page, bridge is a sink')
 for name in ['game.js','love.js','theme/love.css']:
     digest=hashlib.sha256((args.output/name).read_bytes()).hexdigest()[:16]
     html=html.replace('src="'+name+'"', 'src="'+name+'?v='+digest+'"')

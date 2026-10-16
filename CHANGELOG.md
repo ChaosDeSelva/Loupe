@@ -2,7 +2,18 @@
 
 - Optional MCP authoring server and opt-in live bridge.
 - Shared inspector undo/save history for AI edits; screenshots and paused polling.
+- `loupe.editRevision()`: a counter that is 0 until Loupe changes game state (edit, undo, redo, MCP set, or saved overrides applied at attach), so a host can flag modified runs.
 - Local playable Afterimage showcase with Endless mode and original music.
+- Afterimage: opt-in gameplay analytics through vendored ravensight-love 0.3.0 (schema_version 1,
+  twelve events, ANALYTICS switch on the title and pause screens, off by default), saved
+  settings (`settings.txt`), and `src/version.lua`. No key in the repository: release tools inject
+  a public key from `RAVENSIGHT_PUBLIC_KEY`; forks and local builds send nothing. See ADR 0011.
+- Release tooling: `tools/build_itch.py`; `tools/build.sh` writes the analytics config only with
+  `AFTERIMAGE_RELEASE=1`; `build_web.py --distribution web-pages|web-itch`; `game_build` never
+  packages `analytics.config.lua`.
+- Gates: `tools/audit_release.py` flags Ravensight keys and gains `--artifact` (keys only in the
+  two expected places, none in the source zip); `tools/smoke_web.mjs` checks consent in a real
+  browser in the Pages workflow; analytics and settings tests run in `tools/check.sh`.
 
 # Changelog
 

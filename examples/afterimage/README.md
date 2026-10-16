@@ -73,15 +73,96 @@ Loupe can inspect the plain Lua state you expose around those systems.
 - `src/sprites.lua`, `src/physics.lua`: small reusable rendering/collision helpers.
 - `main.lua`: input, screen flow, HUD and shop. Rendering does not change the simulation.
 
-Run `luajit tests/sim_test.lua`, `luajit tests/run_test.lua`, and `luajit tests/assets_test.lua`
-from this directory. The repository quality gates also run these.
+- `src/analytics.lua`, `src/settings.lua`, `src/version.lua`: opt-in gameplay analytics, saved
+  preferences, and the game's version (see "Analytics" below).
+
+Run `luajit tests/sim_test.lua`, `luajit tests/run_test.lua`, `luajit tests/assets_test.lua`,
+`luajit tests/analytics_test.lua` and `luajit tests/settings_test.lua` from this directory. The
+repository quality gates also run these.
+
+## Settings
+
+Art style, reduced motion, mute and both volumes are saved to `settings.txt` in the LÖVE save
+directory (identity `afterimage-first-flight`) whenever they change, and restored at launch. The
+file is plain `key=value` lines; it is parsed, never run, and anything unreadable falls back to the
+defaults. Runs started with an automation flag (`--smoke`, `--playtest`, `--capture`, `--mcp`,
+`--flight`, `--boss`) neither read nor write it.
+
+## Analytics
+
+The official builds can send a small set of anonymous gameplay events to the developer through
+[Ravensight](https://ravensight.io), using the vendored ravensight-love SDK (`lib/ravensight/`,
+version in `lib/ravensight/VERSION`). Nothing is sent unless the player switches
+**ANALYTICS: ON** on the title or pause screen; the line under the switch says what it sends. The
+choice is saved (`ravensight_optin` in the save directory) and can be switched off the same way;
+the switch always shows that saved choice, even while the server has paused collection. A run
+already in progress when the player says yes is never reported: run events start with the next
+run.
+
+**No key in this repository.** The game starts the SDK only when an `analytics.config.lua` is
+present, and only the release tools write one, from the `RAVENSIGHT_PUBLIC_KEY` environment
+variable at build time. The file is gitignored; `analytics.config.example.lua` shows its shape. A
+clone, a fork, `love examples/afterimage` and `tools/build.sh` without a release flag have no
+config: the switch is hidden and the game sends nothing (it still saves `settings.txt` when a
+setting changes). The key is a public `gt_pub_` key:
+it can only write events within the allowlist and limits set for it, and it can be paused or
+revoked from Ravensight. A `gt_live_` key is refused by the build.
+
+| Build | Command | Key |
+| --- | --- | --- |
+| Native release | `AFTERIMAGE_RELEASE=1 RAVENSIGHT_PUBLIC_KEY=gt_pub_... tools/build.sh afterimage` | In `analytics.config.lua` inside the `.love` (`distribution = "native-release"`) |
+| GitHub Pages | `pages.yml`, from the `RAVENSIGHT_PUBLIC_KEY` repository secret | In `site/play/index.html` and `site/downloads/Afterimage.love`; never in `afterimage-source.zip` |
+| itch.io HTML5 | `RAVENSIGHT_PUBLIC_KEY=gt_pub_... python3 tools/build_itch.py --builder ...` | In the zip's `index.html` (`distribution = "web-itch"`) |
+| Anything else | | None |
+
+In a web build the game itself is keyless; the page holds the key and its Ravensight JavaScript
+SDK (`ravensight` 0.4.2 from npm, copied beside `index.html`) does the sending through
+`ravensight-love-bridge.js`. The game's save directory owns the choice: the page constructs that
+SDK only when the game reports the player's yes, keeps nothing about it in `localStorage`, and a
+page built without a key installs the bridge as a sink. When the tab closes, the bridge
+sends the run's last state from an in-memory mailbox the game keeps current.
+
+From the repository root, `python3 tools/audit_release.py --artifact site/play site/downloads`
+checks built artifacts:
+a key may appear only in a native `.love`'s `analytics.config.lua` and a web `index.html`, and
+never in the source zip. `node tools/smoke_web.mjs site/play --expect key|keyless` drives the
+web build in Chromium against a local mock API: no request before the switch, then exactly a
+settings check and a session.
+
+### Event contract (schema_version 1)
+
+Every event carries `schema_version`, `build` (`src/version.lua`), `platform`, `distribution`,
+`qa_source` (`none`, or the automation that started the game), `synthetic` (true when
+`qa_source` is not `none`) and `rs_kind`. Events inside a run also carry `run_id`, `mode`
+(`story` or `endless`) and `modified`, which is true once Loupe has changed game state
+(`loupe.editRevision() > 0`). `level` is only ever the place, `sector_N`; the player's rank is
+`rank`. Times ending in `_s` count play only, never a pause, a stopped Loupe clock or a menu.
+
+| Event | rs_kind | Own properties |
+| --- | --- | --- |
+| `session_started` | none | `art_style`, `reduced_motion` |
+| `run_started` | none | |
+| `sector_started` | level_start | `level`, `sector`, `cycle`, `hull`, `run_time_s` |
+| `pickup_collected` | none | per sector: `sector`, `salvage`, `turbo`, `prism`, `hull_patch`, `total` |
+| `sector_completed` | level_complete | `level`, `sector`, `sector_time_s`, `run_time_s`, `kills`, `hits_taken`, `hull`, `salvage`, `rank`, `boss_defeated` |
+| `upgrade_purchased` | none | `sector`, `upgrade`, `upgrade_rank`, `cost`, `salvage_left` |
+| `player_died` | death | `level`, `sector`, `sector_time_s`, `run_time_s`, `kills`, `hits_taken`, `rank` |
+| `run_completed` | none | `sectors_cleared`, `run_time_s`, `kills`, `rank`, `salvage` |
+| `run_abandoned` | none | `sector`, `sector_time_s`, `run_time_s`, `sectors_cleared`, `screen` |
+| `art_style_changed` | none | `art_style`, `via` (`key` or `button`) |
+| `inspector_opened` | none | `screen`, `opens` |
+| `session_ended` | none | `wall_time_s`, `runs_started`, `runs_completed`, `sectors_completed`, `inspector_opens` |
+
+The SDK adds `rs_event_id` to each event so a resent event is recognised. A story run is about
+20 events. `tests/analytics_test.lua` asserts this table key by key; changing the contract means
+changing the test and bumping `schema_version`.
 
 ## Web export and music sources
 
 From the repository root:
 
 ```sh
-npm install --prefix .webtools love.js@11.4.1
+npm install --prefix .webtools love.js@11.4.1 ravensight@0.4.2
 python3 tools/build_showcase.py --builder .webtools/node_modules/.bin/love.js
 python3 -m http.server 8000 --directory site
 ```

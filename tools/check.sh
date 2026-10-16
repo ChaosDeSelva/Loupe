@@ -38,8 +38,13 @@ luacov
 step "coverage thresholds"
 "${LUA:-luajit}" tools/coverage_gate.lua
 
-step "Afterimage simulation and asset helpers"
-(cd examples/afterimage && "${LUA:-luajit}" tests/sim_test.lua && "${LUA:-luajit}" tests/run_test.lua && "${LUA:-luajit}" tests/assets_test.lua)
+step "Afterimage simulation, asset helpers, analytics contract and settings"
+(cd examples/afterimage \
+  && "${LUA:-luajit}" tests/sim_test.lua \
+  && "${LUA:-luajit}" tests/run_test.lua \
+  && "${LUA:-luajit}" tests/assets_test.lua \
+  && "${LUA:-luajit}" tests/analytics_test.lua \
+  && "${LUA:-luajit}" tests/settings_test.lua)
 
 step "MCP protocol and authoring boundaries"
 "${PYTHON:-python3}" -m unittest discover -s mcp -p 'test_*.py'

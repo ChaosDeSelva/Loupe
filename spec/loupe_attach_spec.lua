@@ -426,6 +426,44 @@ describe("loupe.attach", function()
     end)
   end)
 
+  describe("editRevision", function()
+    local overrides = require("loupe.core.overrides")
+
+    it("is 0 while detached", function()
+      assert.equals(0, loupe.editRevision())
+    end)
+
+    it("is 0 after attach, then grows with an edit and with undo", function()
+      local crate = { x = 600, y = 400, w = 20, h = 20 }
+      loupe.watch({ crate = crate }, "level")
+      loupe.attach({ open = true })
+      love.draw()
+      assert.equals(0, loupe.editRevision())
+      love.mousepressed(610, 410, 1)
+      love.draw()
+      love.mousemoved(630, 420)
+      love.draw()
+      love.mousereleased(630, 420, 1)
+      love.draw()
+      local afterEdit = loupe.editRevision()
+      assert.is_true(afterEdit > 0)
+      fake.keysDown.lctrl = true
+      love.keypressed("z")
+      assert.is_true(loupe.editRevision() > afterEdit)
+    end)
+
+    it("counts saved overrides applied at attach", function()
+      fake.files["loupe_overrides.lua"] = overrides.render({
+        { root = "level", keys = { "crate", "x" }, value = 111 },
+      })
+      loupe.watch({ crate = { x = 600 } }, "level")
+      loupe.attach()
+      assert.is_true(loupe.editRevision() > 0)
+      loupe.detach()
+      assert.equals(0, loupe.editRevision())
+    end)
+  end)
+
   describe("loading overrides", function()
     local overrides = require("loupe.core.overrides")
 

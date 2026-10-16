@@ -11,6 +11,13 @@
 #
 # A built game is fused, so loupe saves overrides to the save directory and hot reload is off
 # (there are no source files to edit). See docs/api.md.
+#
+# Analytics (Afterimage only): every build drops any analytics.config.lua, so a local
+# test key never ships. A release build writes a fresh one from the environment:
+#
+#   AFTERIMAGE_RELEASE=1 RAVENSIGHT_PUBLIC_KEY=gt_pub_... tools/build.sh afterimage
+#
+# Without both, the build is keyless and sends nothing. See examples/afterimage/README.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -44,7 +51,15 @@ for name in "${names[@]}"; do
     mkdir -p "$stage/examples"
     cp -R examples/shared "$stage/examples/shared"
   fi
-  find "$stage" \( -name 'loupe_overrides.lua' -o -name '.DS_Store' -o -name '._*' \) -type f -delete
+  find "$stage" \( -name 'loupe_overrides.lua' -o -name 'analytics.config.lua' -o -name '.DS_Store' -o -name '._*' \) -type f -delete
+  if [ -f "$src/tools/analytics_config.py" ] && [ "${AFTERIMAGE_RELEASE:-}" = "1" ]; then
+    if [ -n "${RAVENSIGHT_PUBLIC_KEY:-}" ]; then
+      python3 "$src/tools/analytics_config.py" --distribution native-release >"$stage/analytics.config.lua"
+      echo "release build: analytics config written (native-release)"
+    else
+      echo "release build without RAVENSIGHT_PUBLIC_KEY: keyless, analytics off" >&2
+    fi
+  fi
 
   rm -f "$DIST/$name.love"
   (cd "$stage" && zip -qr -9 -X "$OLDPWD/$DIST/$name.love" .)

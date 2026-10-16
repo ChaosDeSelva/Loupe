@@ -59,6 +59,9 @@ function M.new(seed, upgrades, sector, endless)
   g.pulseCooldown = 0
   g.pulseRing = 0
   g.bossDefeated = false
+  -- Per-sector tallies for the analytics adapter; gameplay never reads them.
+  g.collected = { salvage = 0, turbo = 0, split = 0, hull = 0 }
+  g.hurts = 0
   local u = g.upgrades
   u.lasers = u.lasers or 0
   g.player = {
@@ -223,6 +226,7 @@ function M.hurt(g, amount)
   end
   p.hp = math.max(0, p.hp - amount)
   p.invulnerable = 1.1
+  g.hurts = g.hurts + 1
   g.shake = 0.35
   g.flash = 0.24
   M.burst(g, p.x, p.y, "cyan", 15)
@@ -323,6 +327,7 @@ function M.advance(g)
 end
 local function collect(g, v)
   local p = g.player
+  g.collected[v.kind] = (g.collected[v.kind] or 0) + 1
   if v.kind == "turbo" then
     g.turbo = 7
     g.banner = "TURBO DRIVE / SPEED +45%"

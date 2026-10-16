@@ -82,6 +82,7 @@ local function loadSavedOverrides()
   end
   local entries = overrides.parse(data)
   state.edits.overrides:load(entries)
+  state.loadedOverrides = #entries
   setMessage("loaded " .. plural(#entries, "saved override", "saved overrides"))
 end
 
@@ -700,6 +701,15 @@ end
 
 function loupe.isAttached()
   return state ~= nil
+end
+
+-- Non-zero once loupe has changed game state in this process. Saving does not
+-- reset it (unlike edits:dirty()), so a host can tell "modified" runs apart.
+function loupe.editRevision()
+  if state == nil then
+    return 0
+  end
+  return state.edits.history.revision + (state.loadedOverrides or 0)
 end
 
 function loupe.isOpen()

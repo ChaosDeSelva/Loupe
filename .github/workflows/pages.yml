@@ -2,7 +2,7 @@ name: Deploy GitHub Pages
 on:
   push:
     branches: [main]
-    paths: ['site/**', 'examples/afterimage/**', 'loupe/**', 'mcp/**', 'tools/build_showcase.py', '.github/workflows/pages.yml']
+    paths: ['site/**', 'examples/afterimage/**', 'loupe/**', 'mcp/**', 'tools/build_showcase.py', 'tools/audit_release.py', 'tools/smoke_web.mjs', '.github/workflows/pages.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,9 +26,30 @@ jobs:
         with:
           python-version: '3.12'
       - name: Build playable showcase
+        # The public key comes only from this secret. A fork has none, so its
+        # build is keyless and sends nothing (see examples/afterimage/README.md).
+        env:
+          RAVENSIGHT_PUBLIC_KEY: ${{ secrets.RAVENSIGHT_PUBLIC_KEY }}
         run: |
-          npm install --prefix .webtools love.js@11.4.1
+          npm install --prefix .webtools love.js@11.4.1 ravensight@0.4.2 playwright@1.63.0
           python3 tools/build_showcase.py --builder .webtools/node_modules/.bin/love.js
+      - name: Audit built artifacts for keys
+        run: python3 tools/audit_release.py --artifact site/play site/downloads
+      - name: Browser smoke (consent before any request)
+        env:
+          HAS_KEY: ${{ secrets.RAVENSIGHT_PUBLIC_KEY != '' }}
+        # With the secret: the keyed page, then a copy of it with the key blanked,
+        # which is what a fork builds. Without it (a fork): the keyless page only.
+        run: |
+          .webtools/node_modules/.bin/playwright install --with-deps chromium
+          if [ "$HAS_KEY" = "true" ]; then
+            node tools/smoke_web.mjs site/play --expect key --modules .webtools
+            rm -rf "$RUNNER_TEMP/play-keyless" && cp -R site/play "$RUNNER_TEMP/play-keyless"
+            python3 -c "import re,sys; p=sys.argv[1]; s=open(p).read(); s,n=re.subn(r\"RAVENSIGHT_PUBLIC_KEY='[^']*'\",\"RAVENSIGHT_PUBLIC_KEY=''\",s); assert n==1; open(p,'w').write(s)" "$RUNNER_TEMP/play-keyless/index.html"
+            node tools/smoke_web.mjs "$RUNNER_TEMP/play-keyless" --expect keyless --modules .webtools
+          else
+            node tools/smoke_web.mjs site/play --expect keyless --modules .webtools
+          fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

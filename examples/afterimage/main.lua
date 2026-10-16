@@ -8,6 +8,9 @@ local window = require("loupe.window")
 local browserBuild = false -- Replaced only by the web exporter.
 local browserWidth, browserHeight = nil, nil
 local backdrops = require("src.backdrops")
+local analytics = require("src.analytics")
+local settings = require("src.settings")
+local version = require("src.version")
 local lg = love.graphics
 local game = sim.new(42)
 local view = { scale = 1, x = 0, y = 0 }
@@ -19,6 +22,14 @@ local paused = false
 local loupe
 local playtest = false
 local playtestTime = 0
+-- Analytics: the Ravensight SDK only when a release tool injected a config
+-- (analytics.config.lua); otherwise nil, no toggle, nothing sent. See README.md.
+local ravensight
+local track
+local prefs
+local qaSource = "none"
+local quitting = false
+local MAILBOX = "/tmp/ravensight-exit.json"
 local mcpEnabled = false
 for _, v in ipairs(arg or {}) do
   if v == "--mcp" then
@@ -45,6 +56,95 @@ local function begin(keep, endless)
   backdrops.next()
   screen = "flight"
   paused = false
+  track:runStarted(game)
+end
+local function currentSettings()
+  return {
+    art = art.illustrated and "illustrated" or "vector",
+    reduced_motion = backdrops.reducedMotion,
+    muted = audio.muted,
+    music = audio.musicVolume,
+    effects = audio.effectsVolume,
+  }
+end
+local function savePrefs()
+  -- Automation never rewrites the player's settings.
+  if prefs and qaSource == "none" then
+    prefs.save(currentSettings())
+  end
+end
+local function buy(kind)
+  local cost = sim.cost(game, kind)
+  if sim.buy(game, kind) then
+    track:upgradePurchased(game, kind, cost)
+    return true
+  end
+  return false
+end
+local consent
+local function analyticsOn()
+  return consent ~= nil and consent.isOn()
+end
+local function toggleAnalytics()
+  consent.toggle()
+  track:sessionStarted(currentSettings())
+end
+local function writeMailbox(text)
+  -- love.js keeps /tmp in its in-memory file system; the page's bridge reads
+  -- it on pagehide. love.filesystem cannot write there, so plain io is used.
+  if text then
+    local file = io.open(MAILBOX, "w")
+    if file then
+      file:write(text)
+      file:close()
+    end
+  else
+    os.remove(MAILBOX)
+  end
+end
+local function startAnalytics(args)
+  qaSource = analytics.qaSource(args, os.getenv)
+  local config = analytics.loadConfig(love.filesystem.load)
+  local sdk = {
+    track = function() end,
+    enabled = function()
+      return false
+    end,
+  }
+  if config and (config.ingestKey ~= "" or browserBuild) then
+    ravensight = require("lib.ravensight")
+    ravensight.init({
+      ingestKey = config.ingestKey,
+      apiUrl = config.apiUrl,
+      gameVersion = version.version,
+      consent = "opt_in",
+      optional = true,
+      distribution = config.distribution,
+      transport = browserBuild and "web" or nil,
+    })
+    sdk = ravensight
+    local optin = require("lib.ravensight.core").OPTIN_FILE
+    consent = analytics.consentSwitch({
+      saved = function()
+        return love.filesystem.getInfo(optin) ~= nil
+      end,
+      set = ravensight.setTrackingEnabled,
+    })
+  end
+  track = analytics.new({
+    sdk = sdk,
+    editRevision = function()
+      return loupe.editRevision()
+    end,
+    random = love.math.random,
+    clock = love.timer.getTime,
+    build = version.version,
+    platform = analytics.platformName(love.system.getOS()),
+    distribution = config and config.distribution or "source",
+    qaSource = qaSource,
+    mailbox = analytics.usesMailbox(love.system.getOS()) and ravensight and writeMailbox or nil,
+    encode = ravensight and require("lib.ravensight.json").encode,
+  })
 end
 local function button(id, label, x, y, w, h, enabled)
   enabled = enabled ~= false
@@ -95,6 +195,22 @@ function love.load(args)
   audio.load()
   backdrops.load()
   updateView()
+  startAnalytics(args)
+  prefs = settings.new({
+    read = function(name)
+      return love.filesystem.getInfo(name) and love.filesystem.read(name) or nil
+    end,
+    write = love.filesystem.write,
+  })
+  if qaSource == "none" then
+    local saved = prefs.load()
+    art.illustrated = saved.art == "illustrated"
+    backdrops.reducedMotion = saved.reduced_motion
+    audio.setVolume("music", saved.music)
+    audio.setVolume("effects", saved.effects)
+    audio.setMuted(saved.muted)
+  end
+  track:sessionStarted(currentSettings())
   for i, v in ipairs(args) do
     if v == "--smoke" then
       smokeFrames = tonumber(args[i + 1]) or 120
@@ -109,6 +225,7 @@ function love.load(args)
       playtest = true
       game = sim.new(42)
       screen = "flight"
+      track:runStarted(game)
     end
     if v == "--flight" then
       begin(false)
@@ -117,6 +234,7 @@ function love.load(args)
       game = sim.new(42, nil, 3)
       screen = "flight"
       game.player.y = 520
+      track:runStarted(game)
     end
     if v == "--title-capture" then
       screen = "title"
@@ -130,6 +248,7 @@ function love.resize()
 end
 function love.update(dt)
   elapsed = elapsed + dt
+  track:update(dt, screen == "flight" and not paused, screen == "dock")
   audio.update(dt, screen, game.pattern)
   backdrops.update(dt, game.sector)
   if smokeFrames then
@@ -191,6 +310,7 @@ function love.update(dt)
     elseif game.state == "victory" then
       screen = "victory"
     end
+    track:observe(game)
   end
   if screen == "lost" then
     -- Let the final hit flash, shake and particles expire after combat stops.
@@ -198,10 +318,11 @@ function love.update(dt)
   end
   if playtest and screen == "dock" then
     print("PLAYTEST sector " .. game.sector .. " cleared; kills=" .. game.kills)
-    while sim.buy(game, "power") do
+    while buy("power") do
     end
-    sim.buy(game, "repair")
+    buy("repair")
     game = sim.advance(game)
+    track:sectorStarted(game)
     screen = "flight"
   elseif playtest and screen == "victory" then
     print("PASS: rendered story, upgrades, boss, both art modes, music and effects")
@@ -429,6 +550,17 @@ local function field()
   art.color("muted", 0.35)
   lg.rectangle("line", f.x, f.y, f.w, f.h, 3, 3)
 end
+-- The player's analytics switch and what it does, in one line. Shown only in
+-- builds that can send (a release or web config); a source checkout has none.
+local DISCLOSURE = "Sends anonymous play stats (sectors, upgrades, deaths) "
+  .. "to the developer while ON."
+local function analyticsToggle(x, y)
+  if not ravensight then
+    return
+  end
+  button("analytics", analyticsOn() and "ANALYTICS: ON" or "ANALYTICS: OFF", x, y, 230, 40)
+  art.text(DISCLOSURE, x, y + 50, 11, "muted")
+end
 local function overlay()
   if screen == "flight" and not paused then
     if game.state == "clearing" then
@@ -464,6 +596,7 @@ local function overlay()
       12,
       "muted"
     )
+    analyticsToggle(145, 716)
   elseif paused then
     art.text("HOLDING PATTERN", 280, 338, 39)
     art.text("Take your time. The stars can wait.", 280, 400, 17, "muted")
@@ -487,6 +620,7 @@ local function overlay()
     )
     button("fxdown", "−", 440, 650, 50, 42)
     button("fxup", "+", 500, 650, 50, 42)
+    analyticsToggle(280, 712)
   elseif screen == "lost" then
     art.text("SIGNAL LOST", 200, 315, 49, "orange")
     art.text("Every good pilot starts with a few bad flights.", 200, 390, 17, "muted")
@@ -615,6 +749,13 @@ function love.draw()
       end
     end
   end
+  -- The SDK's timers run here rather than in love.update, because Loupe's
+  -- clock can stop the game's update; a quit held for the last events must
+  -- still finish.
+  if ravensight then
+    ravensight.update()
+  end
+  track:inspector(loupe.isOpen(), paused and "paused" or screen)
   lg.clear(0.015, 0.024, 0.033)
   if art.illustrated then
     local width, height = lg.getDimensions()
@@ -638,8 +779,11 @@ function love.draw()
 end
 local function action(id)
   focusedButton = nil
-  if id == "art" then
+  if id == "analytics" then
+    toggleAnalytics()
+  elseif id == "art" then
     art.illustrated = not art.illustrated
+    track:artStyleChanged(art.illustrated, "button")
   elseif id == "musicdown" then
     audio.setVolume("music", audio.musicVolume - 0.1)
   elseif id == "musicup" then
@@ -658,15 +802,17 @@ local function action(id)
     paused = false
   elseif id == "next" then
     game = sim.advance(game)
+    track:sectorStarted(game)
     screen = "flight"
     paused = false
   elseif id == "inspect" then
     loupe.setOpen(true)
   elseif id == "replay" then
     begin(true)
-  elseif sim.buy(game, id) then
+  elseif buy(id) then
     audio.play("buy")
   end
+  savePrefs()
 end
 function love.mousemoved()
   focusedButton = nil
@@ -737,6 +883,7 @@ function love.keypressed(key)
     paused = not paused
   elseif key == "v" then
     art.illustrated = not art.illustrated
+    track:artStyleChanged(art.illustrated, "key")
   elseif key == "b" then
     backdrops.next()
   elseif key == "r" then
@@ -758,6 +905,18 @@ function love.keypressed(key)
       love.event.quit()
     end
   end
+  savePrefs()
+end
+function love.quit()
+  -- Runs again when the SDK ends a held quit; record the end only once.
+  if not quitting then
+    quitting = true
+    track:quit(paused and "paused" or screen)
+  end
+  if ravensight then
+    return ravensight.quit()
+  end
+  return false
 end
 function love.filedropped(file)
   backdrops.import(file)

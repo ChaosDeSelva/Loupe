@@ -199,7 +199,9 @@ do
   local h = harness()
   story = h
   h.a:sessionStarted({ art = "illustrated", reduced_motion = false })
-  local g = sim.new(42)
+  -- A seed the reference pilot wins with this shopping list (the balance pass
+  -- made sector 3 of seed 42 a loss).
+  local g = sim.new(6)
   h.a:runStarted(g)
   for sector = 1, 3 do
     play(g)
@@ -207,7 +209,7 @@ do
     h.a:update(30, false, false) -- paused or on a menu: not counted
     h.a:observe(g)
     h.a:observe(g) -- a sector resolves once
-    assert(g.state ~= "lost", "the reference pilot wins seed 42")
+    assert(g.state ~= "lost", "the reference pilot wins seed 6")
     if sector < 3 then
       h.a:update(4, false, true) -- docked: run time only
       for _, kind in ipairs({ "power", "drive", "repair" }) do
