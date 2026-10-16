@@ -116,6 +116,14 @@ local function startAnalytics(args)
       transport = browserBuild and "web" or nil,
     })
     sdk = ravensight
+    if browserBuild then
+      -- SDK init has read the save folder by now. The page must wait for this
+      -- explicit state before constructing its JS client or opening a session.
+      print("__AFTERIMAGE_READY__ " .. require("lib.ravensight.json").encode({
+        v = 1,
+        enabled = ravensight.enabled() == true,
+      }))
+    end
   end
   track = analytics.new({
     sdk = sdk,

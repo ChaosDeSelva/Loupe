@@ -15,6 +15,8 @@ import argparse
 import io
 import re
 import struct
+import stat
+from pathlib import PurePosixPath
 import subprocess
 import zipfile
 from pathlib import Path
@@ -67,63 +69,103 @@ def main():
 def is_zip(data):
     return b'PK\x05\x06' in data[-65558:]
 
-def walk(name, data, depth=0):
-    """Yield (path, bytes) for a blob or, when it is a zip, recursively for its members.
-    A readable zip is judged by its members, so a stored (uncompressed) member is not
-    reported twice, once inside the container and once on its own."""
-    archive = None
-    if depth <= 3 and is_zip(data):
-        try:
-            archive = zipfile.ZipFile(io.BytesIO(data))
-        except zipfile.BadZipFile:
-            archive = None
-    if archive is None:
+MAX_DEPTH = 8
+MAX_EXPANDED_BYTES = 512 * 1024 * 1024
+MAX_MEMBERS = 10000
+
+class AuditError(ValueError):
+    pass
+
+def walk(name, data, depth=0, budget=None):
+    """Fail closed on unscannable archives; never extract archive members."""
+    budget = budget if budget is not None else [0, 0]
+    expected_archive = name.lower().endswith(('.zip', '.love')) or is_zip(data) or data.startswith(b'PK\x03\x04')
+    if not expected_archive:
         yield name, data
         return
-    for info in archive.infolist():
-        if not info.is_dir():
-            yield from walk(name + '!' + info.filename, archive.read(info), depth + 1)
+    if depth >= MAX_DEPTH:
+        raise AuditError('archive nesting exceeds scan limit')
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            for info in archive.infolist():
+                member = PurePosixPath(info.filename.replace('\\', '/'))
+                if not member.parts or member.is_absolute() or '..' in member.parts or ':' in member.parts[0]:
+                    raise AuditError('unsafe archive member path')
+                if stat.S_ISLNK(info.external_attr >> 16):
+                    raise AuditError('symlink in archive')
+                if info.flag_bits & 1:
+                    raise AuditError('encrypted archive cannot be scanned')
+                if info.is_dir(): continue
+                budget[0] += info.file_size
+                budget[1] += 1
+                if budget[0] > MAX_EXPANDED_BYTES or budget[1] > MAX_MEMBERS:
+                    raise AuditError('archive expansion exceeds scan limit')
+                yield from walk(name + '!' + info.filename, archive.read(info), depth + 1, budget)
+    except (zipfile.BadZipFile, RuntimeError, NotImplementedError, OSError) as error:
+        raise AuditError('unreadable archive: ' + type(error).__name__) from error
+
+def source_member(path):
+    return any('source' in part.lower() and part.lower().endswith('.zip') for part in path.split('!'))
 
 def key_allowed(path, key, web_roots):
-    """A public key at one of the two expected places: analytics.config.lua at the root
-    of a .love, or a web build's root index.html (the root of a folder given on the
-    command line, or the root of a zip). An index.html anywhere deeper is a finding."""
-    if not key.startswith(b'gt_pub_'):
-        return False
+    if not key.startswith(b'gt_pub_') or source_member(path): return False
     parts = path.split('!')
     if len(parts) >= 2 and parts[-1] == CONFIG:
         return parts[-2].endswith('.love')
-    if len(parts) == 1:
-        return path in web_roots
+    if len(parts) == 1: return path in web_roots
     return len(parts) == 2 and parts[0].endswith('.zip') and parts[1] == 'index.html'
 
+def public_key_slots(path, data):
+    # Only the injected assignment may contain a public key, not arbitrary
+    # comments, URLs or copied credentials elsewhere in an allowlisted file.
+    name = path.split('!')[-1]
+    pattern = (rb"\bingestKey\s*=\s*[\"'](gt_pub_[A-Za-z0-9_-]{16,64})[\"']"
+               if name == CONFIG else
+               rb"\bconst\s+RAVENSIGHT_PUBLIC_KEY\s*=\s*[\"'](gt_pub_[A-Za-z0-9_-]{16,64})[\"']")
+    return {m.span(1) for m in re.finditer(pattern, data)}
+
+def private_path(name):
+    for segment in name.split('!'):
+        for part in PurePosixPath(segment.replace('\\', '/')).parts:
+            if part in PRIVATE or part in {'.git', '.aws', '.ssh'} or part.startswith('.env.'):
+                return True
+    return False
+
 def audit_artifacts(paths):
-    findings = []; blobs = 0; keys = 0
-    files = []
-    web_roots = set()
-    for path in paths:
-        path = Path(path)
+    findings = []; blobs = 0; keys = 0; files = []; web_roots = set()
+    for raw in paths:
+        path = Path(raw)
+        if path.is_symlink():
+            findings.append((str(path), 'symlink artifact')); continue
         if path.is_dir():
-            files += [p for p in sorted(path.rglob('*')) if p.is_file() and not p.is_symlink()]
+            for p in sorted(path.rglob('*')):
+                if p.is_symlink(): findings.append((str(p), 'symlink artifact'))
+                elif p.is_file(): files.append(p)
             web_roots.add(str(path / 'index.html'))
         elif path.is_file():
             files.append(path)
-            if path.name == 'index.html':
-                web_roots.add(str(path))
-        else:
-            findings.append((str(path), 'artifact missing'))
+            if path.name == 'index.html': web_roots.add(str(path))
+        else: findings.append((str(path), 'artifact missing'))
     for path in files:
-        source_zip = 'source' in path.name.lower() and path.suffix == '.zip'
-        for inner, data in walk(str(path), path.read_bytes()):
-            blobs += 1
-            if source_zip and inner.split('!')[-1].rsplit('/', 1)[-1] == CONFIG:
-                findings.append((inner, 'analytics config in a source zip'))
-            for match in KEY.finditer(data):
-                keys += 1
-                if source_zip:
-                    findings.append((inner, 'ingest key in a source zip'))
-                elif not key_allowed(inner, match.group(0), web_roots):
-                    findings.append((inner, 'ingest key outside the two expected places'))
+        try:
+            for inner, data in walk(str(path), path.read_bytes()):
+                blobs += 1
+                if private_path(inner): findings.append((inner, 'private state in artifact'))
+                if source_member(inner) and inner.split('!')[-1].rsplit('/', 1)[-1] == CONFIG:
+                    findings.append((inner, 'analytics config in a source zip'))
+                # Apply the same credential/path/branding rules to artifacts as
+                # source; previously this mode checked only Ravensight keys.
+                for label, pattern in RULES.items():
+                    if label != 'Ravensight ingest key' and pattern.search(data):
+                        findings.append((inner, label))
+                slots = public_key_slots(inner, data)
+                matches = list(KEY.finditer(data))
+                for match in matches:
+                    keys += 1
+                    if not key_allowed(inner, match.group(0), web_roots) or match.span() not in slots or len(matches) != 1:
+                        findings.append((inner, 'ingest key outside its single injected public-key assignment'))
+        except (AuditError, OSError, ValueError) as error:
+            findings.append((str(path), 'scan incomplete: ' + str(error)))
     for path, label in findings: print(f'REVIEW {path}: {label}')
     print(f'Scanned {len(files)} artifact files ({blobs} files including archive members); '
           f'{keys} ingest key occurrences.')

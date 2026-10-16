@@ -9,19 +9,14 @@
 <canvas id="canvas" tabindex="0" aria-label="Afterimage game. WASD or arrows move; Space pulse; Tab pause; V switches art; M mutes sound."></canvas>
 <section id="start" aria-label="Start Afterimage">
 <img src="afterimage-logo.png" alt="Afterimage: The Glass Reach">
-<div><button id="launch" disabled>Loading flight systems…</button></div>
-<p id="status" role="status">Preparing flight systems…</p>
+<div><button id="launch" disabled autofocus>Play</button></div>
+<p id="status" role="status" hidden>Preparing flight systems…</p>
 </section>
 <button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen (F11)" hidden>⛶</button>
 <script>
-// Analytics. The build writes the public key here from RAVENSIGHT_PUBLIC_KEY; a
-// fork or a local build has none, and then the bridge is a sink: the game runs
-// the same and nothing is sent. With a key, analytics is always on (disclosed
-// on the game's title screen): the page starts its SDK when the player presses
-// Play, without waiting for any line from the game. The game's opt-out line
-// ("enabled false"), printed only when the SDK's own opt-out file exists in the
-// save folder, still stops all sending. The page never reads or writes a
-// choice in localStorage, which every page on this origin shares.
+// The Lua SDK reads the saved opt-out before the game sends its ready line.
+// Do not construct the JS SDK (which creates an id and lifecycle event) until
+// that line explicitly says enabled. Missing or malformed readiness stays off.
 const RAVENSIGHT_PUBLIC_KEY='{{RAVENSIGHT_PUBLIC_KEY}}';
 const RAVENSIGHT_API_URL='{{RAVENSIGHT_API_URL}}';
 const AFTERIMAGE_VERSION='{{AFTERIMAGE_VERSION}}';
@@ -30,7 +25,8 @@ const start=document.getElementById('start');
 const status=document.getElementById('status');
 const full=document.getElementById('fullscreen');
 let started=false, runtimeReady=false;
-let pixelBudget=2560*1440, sampleStart=0, frameCount=0, slowSamples=0;
+let pixelBudget=3840*2160, sampleStart=0, frameCount=0, slowSamples=0;
+let qualityStart=0, lastQualityDrop=0;
 var Module={
   htmlFullscreen:true, arguments:['./game.love'], INITIAL_MEMORY:268435456, canvas,
   printErr:console.error.bind(console),
@@ -52,13 +48,39 @@ function fit(){
   canvas.dataset.renderSize=size;
   canvas.style.width='100%';canvas.style.height='100%';
 }
-// The bridge calls init() again if the game ever prints "enabled true"; one
-// settings check and one session per page, however often it is asked.
-function initOnce(rs){
-  const start=rs.init.bind(rs);
-  let starting=null;
-  rs.init=()=>starting||(starting=start());
-  return rs;
+// Keep the client absent until the game has finished loading its saved choice.
+function deferredRavensight(make){
+  let rs=null, starting=null, ready=false, allowed=false, denied=false;
+  return {
+    ready(value){ready=true;this.setEnabled(value);if(value)this.init().catch(error=>console.warn('Analytics unavailable:',error.message));},
+    get initialized(){return Boolean(starting)||(rs?rs.initialized:false);},
+    get _inflightSize(){return rs?rs._inflightSize:0;},
+    setEnabled(value){if(value===false)denied=true;allowed=ready&&!denied&&value===true;if(allowed&&!rs)rs=make();if(rs)rs.setEnabled(allowed);},
+    init(){if(!allowed||!rs)return Promise.resolve(null);if(!starting)starting=rs.init();return starting;},
+    track(...args){return allowed&&rs?rs.track(...args):undefined;},
+    submitFeedback(...args){return allowed&&rs?rs.submitFeedback(...args):Promise.resolve(false);},
+    flush(){return allowed&&rs?rs.flush():Promise.resolve(0);},
+    _flushOnHidden(offset){return allowed&&rs?rs._flushOnHidden(offset):false;}
+  };
+}
+function watchGameReady(){
+  const print=Module.print;
+  let seen=false;
+  Module.print=(...args)=>{
+    if(args.length===1&&typeof args[0]==='string'&&args[0].startsWith('__AFTERIMAGE_READY__ ')){
+      if(!seen){
+        try{
+          const message=JSON.parse(args[0].slice('__AFTERIMAGE_READY__ '.length));
+          if(message.v===1&&typeof message.enabled==='boolean'){
+            seen=true;canvas.dataset.analyticsReady=String(message.enabled);
+            if(client)client.ready(message.enabled);
+          }
+        }catch(error){/* Fail closed; never let a malformed line start tracking. */}
+      }
+      return;
+    }
+    return print(...args);
+  };
 }
 function silenceTaggedLines(){
   const print=Module.print||console.log.bind(console);
@@ -95,7 +117,7 @@ function prepareAnalytics(){
     const {default:Ravensight}=await import('./ravensight/index.js');
     const options={ingestKey:key,gameVersion:AFTERIMAGE_VERSION};
     if(/^https?:\/\//.test(RAVENSIGHT_API_URL))options.apiUrl=RAVENSIGHT_API_URL;
-    client=initOnce(new Ravensight(options));
+    client=deferredRavensight(()=>new Ravensight(options));
     // storage: null keeps the bridge off localStorage; the game's save folder decides.
     bridge.installRavensightBridge(client,Module,{consent:'opt_out',storage:null});
     return 'live';
@@ -119,20 +141,21 @@ async function launch(fullscreen){
   started=true;start.hidden=true;full.hidden=false;
   // The bridge must wrap Module.print before Love(Module) reads it.
   await prepareAnalytics();
-  if(client)Promise.resolve(client.init()).catch(error=>console.warn('Analytics unavailable:',error&&error.message));
   watchChoiceLines();
+  watchGameReady();
   Love(Module);canvas.focus();
   // The initial LÖVE window setup follows runtime initialization; settle both on the next frames.
   function settle(now){
     if(!sampleStart)sampleStart=now;
+    if(!qualityStart)qualityStart=now;
     frameCount++;
     if(now-sampleStart>=1000){
       const fps=frameCount*1000/(now-sampleStart);
       canvas.dataset.frameRate=Math.round(fps);
-      slowSamples=!document.hidden&&fps<45?slowSamples+1:0;
-      if(slowSamples>=3&&pixelBudget>1440*900){
-        pixelBudget=Math.max(1440*900,Math.round(pixelBudget*.75));
-        slowSamples=0;
+      slowSamples=!document.hidden&&now-qualityStart>10000&&fps<40?slowSamples+1:0;
+      if(slowSamples>=8&&now-lastQualityDrop>15000&&pixelBudget>1920*1080){
+        pixelBudget=Math.max(1920*1080,Math.round(pixelBudget*.9));
+        slowSamples=0;lastQualityDrop=now;
       }
       frameCount=0;sampleStart=now;fit();
     }
@@ -144,6 +167,7 @@ function applicationLoad(){
   prepareAnalytics();
   document.getElementById('launch').disabled=false;document.getElementById('launch').textContent='Play';
   status.textContent='';
+  if(!started)document.getElementById('launch').focus({preventScroll:true});
 }
 document.getElementById('launch').onclick=()=>launch(false);
 full.onclick=toggleFullscreen;

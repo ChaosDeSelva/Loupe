@@ -42,6 +42,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - run: python3 -m unittest discover -s tools -p "test_audit_release.py"
+      - run: node --test tools/test_web_bootstrap.mjs
       - run: python3 tools/audit_release.py
       - run: python3 -m unittest discover -s mcp -p "test_*.py"
 

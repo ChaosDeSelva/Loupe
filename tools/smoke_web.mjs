@@ -85,7 +85,7 @@ const { chromium } = await loadPlaywright();
 const server = await serve(root);
 const base = `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
-const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+const context = await browser.newContext({ viewport: { width: Number(option('--width', '1440')), height: Number(option('--height', '900')) }, deviceScaleFactor: Number(option('--dpr', '1')) });
 const api = [];
 const foreign = [];
 await context.route(apiOrigin + '/**', async (route) => {
@@ -113,6 +113,8 @@ async function launch() {
   await page.waitForSelector('#launch:not([disabled])', { timeout: timeoutMs });
   await sleep(1500);
   check(api.length === 0, `no API request before the player presses Play (${api.length})`);
+  check(await page.locator('#launch').evaluate(el=>document.activeElement===el), 'Play receives initial focus');
+  check(await page.locator('#status').isHidden(), 'launch status is hidden');
   await page.click('#launch');
   await until(() => page.evaluate(() => {
     try { return Boolean(window.Module && Module.FS && Module.FS.readFile('/tmp/afterimage-input.txt')); } catch { return false; }
@@ -123,6 +125,10 @@ const readMailbox = () => page.evaluate(() => { try { return Module.FS.readFile(
 
 try {
   await launch();
+  if (option('--screenshot')) {
+    console.log('Canvas: ' + await page.getAttribute('#canvas', 'data-render-size'));
+    await page.screenshot({ path: option('--screenshot') });
+  }
   const mode = await page.evaluate(() => document.documentElement.dataset.analytics);
   check(mode === (expect === 'key' ? 'live' : 'sink'), `page analytics mode is ${mode}`);
   if (expect === 'keyless') {
@@ -153,9 +159,26 @@ try {
       'events name the web distribution and platform');
     check(await page.evaluate(() => localStorage.getItem('ravensight.love.enabled')) === null,
       'the page keeps no choice in localStorage');
+    check(await page.getAttribute('#canvas', 'data-analytics-ready') === 'true', 'SDK startup follows the game ready signal');
+    // Emulate a returning player's existing SDK opt-out, then reload normally.
+    await page.evaluate(() => new Promise((resolve, reject) => {
+      const dir='/home/web_user/love/afterimage-first-flight';
+      Module.FS.mkdirTree(dir);
+      Module.FS.writeFile(dir+'/ravensight_optout', '1');
+      Module.FS.syncfs(false, error => error ? reject(error) : resolve());
+    }));
+    const beforeOptOut=api.length;
+    await page.reload();
+    await page.waitForSelector('#launch:not([disabled])');
+    await page.click('#launch');
+    await until(() => page.getAttribute('#canvas','data-analytics-ready').then(x=>x==='false'), 'saved opt-out ready signal');
+    await sleep(5000);
+    check(api.length===beforeOptOut, 'saved opt-out makes ZERO settings/session/event requests on return');
+    check(await readMailbox()===null, 'saved opt-out has no exit-event mailbox');
+
   }
   const mailbox = await readMailbox();
-  check(Boolean(mailbox && mailbox.includes('session_ended')), 'the exit mailbox is kept in the love.js file system');
+  if(expect==='keyless')check(Boolean(mailbox && mailbox.includes('session_ended')), 'the exit mailbox is kept in the love.js file system');
   check(foreign.length === 0, `no request to any other origin (${foreign.join(' ') || 'none'})`);
 } catch (error) {
   failures.push(error.message);

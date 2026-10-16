@@ -1,5 +1,9 @@
 # 1.2.0 — local preview
 
+- Afterimage web startup waits for the game to read its saved analytics choice before creating a browser session; a saved opt-out makes no analytics requests.
+- Web canvas supports up to 3840×2160 with gentler sustained-slow-frame scaling. The launch screen shows the logo and a focused Play button.
+- Release audit scans nested archives, rejects incomplete scans and unsafe members, and limits public keys to their exact release configuration slots.
+
 - Optional MCP authoring server and opt-in live bridge.
 - Shared inspector undo/save history for AI edits; screenshots and paused polling.
 - `loupe.editRevision()`: a counter that is 0 until Loupe changes game state (edit, undo, redo, MCP set, or saved overrides applied at attach), so a host can flag modified runs.
