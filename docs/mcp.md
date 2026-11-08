@@ -29,6 +29,9 @@ Use an absolute expanded path in the MCP configuration. The folder appears after
 launching with `--mcp`. You can configure the server without `--bridge-dir` to
 scaffold first, then add the generated identity's path and reconnect. For an
 existing custom save configuration, `loupe.bridgeDirectory()` is authoritative.
+If the game changes its save identity after `attach` (a `love.filesystem.setIdentity` call in
+`love.load`, say for a separate test save), the bridge moves to the new save directory on the
+first frame; point `--bridge-dir` at that final identity.
 
 For Codex, add a server to your MCP configuration (replace every path):
 

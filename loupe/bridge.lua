@@ -71,10 +71,35 @@ local function decode(text, session)
   return action, root, keys, value
 end
 function M.new(api)
-  assert(love.filesystem.createDirectory(DIR), "cannot create MCP bridge directory")
   local session = tostring(os.time()) .. "-" .. tostring(love.timer.getTime()):gsub("%.", "")
-  assert(love.filesystem.write(DIR .. "/session", session))
-  local bridge = { directory = love.filesystem.getSaveDirectory() .. "/" .. DIR }
+  local bridge = {}
+  local saveDir -- the save directory the session file was written to
+  local function open()
+    saveDir = love.filesystem.getSaveDirectory()
+    assert(love.filesystem.createDirectory(DIR), "cannot create MCP bridge directory")
+    assert(love.filesystem.write(DIR .. "/session", session))
+    bridge.directory = saveDir .. "/" .. DIR
+  end
+  -- attach runs at the end of main.lua, before love.load. A game that calls
+  -- love.filesystem.setIdentity there moves the save directory, and every
+  -- love.filesystem call below with it, so the session follows: written in the
+  -- new place, and removed from the old one if it is still ours.
+  local function followSaveDirectory()
+    if love.filesystem.getSaveDirectory() == saveDir then
+      return
+    end
+    local old = bridge.directory .. "/session"
+    local f = io.open(old, "r")
+    local ours = f and f:read("*a") == session
+    if f then
+      f:close()
+    end
+    if ours then
+      os.remove(old)
+    end
+    open()
+  end
+  open()
   local function reply(id, value)
     local path = DIR .. "/" .. id .. ".response"
     local temp = path .. ".tmp"
@@ -83,6 +108,7 @@ function M.new(api)
     assert(os.rename(base .. temp, base .. path))
   end
   function bridge.poll()
+    followSaveDirectory()
     local count = 0
     for _, name in ipairs(love.filesystem.getDirectoryItems(DIR)) do
       local id = name:match("^(%x+)%.request$")

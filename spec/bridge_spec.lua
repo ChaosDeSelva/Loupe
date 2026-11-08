@@ -100,6 +100,37 @@ describe("local MCP transport", function()
     assert.matches('"ok":false', request("status", nil, nil, nil, nil, os.time() - 1), 1, true)
     assert.matches('"ok":false', request("set", "game", "szz"), 1, true)
   end)
+  it("follows a save directory the game changes after attach", function()
+    -- A game that calls love.filesystem.setIdentity in love.load: the session moves with it.
+    local before = files
+    local removed
+    local remover = stub(os, "remove", function(path)
+      removed = path
+      return true
+    end)
+    local opener = stub(io, "open", function(path)
+      local text = path == "/save/loupe-mcp/session" and before["loupe-mcp/session"]
+      return text
+        and {
+          read = function()
+            return text
+          end,
+          close = function() end,
+        }
+    end)
+    local newFiles = {} -- the stub's files are per directory: "/test" starts empty
+    love.filesystem.getSaveDirectory = function()
+      return "/test"
+    end
+    files = newFiles
+    instance:poll()
+    remover:revert()
+    opener:revert()
+    assert.equal("/test/loupe-mcp", instance.directory)
+    assert.equal(before["loupe-mcp/session"], newFiles["loupe-mcp/session"])
+    assert.equal("/save/loupe-mcp/session", removed)
+    assert.matches('"action":"status"', request("status"), 1, true)
+  end)
   it("captures screenshots and closes only its own session", function()
     assert.matches(id .. ".png", request("screenshot"), 1, true)
     assert.equal("PNG", files["loupe-mcp/" .. id .. ".png"])
