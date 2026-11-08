@@ -1,5 +1,11 @@
 # 1.2.0 — local preview
 
+- MCP bridge follows the save directory when a game calls `love.filesystem.setIdentity` after
+  `attach` (for example in `love.load`): the session moves on the next frame instead of staying
+  in the old identity's folder, where requests timed out.
+- The error badge names the configured toggle key (`attach({ keys = { toggle = "f3" } })`)
+  instead of always saying F1.
+
 - Afterimage web startup waits for the game to read its saved analytics choice before creating a browser session; a saved opt-out makes no analytics requests.
 - Web canvas supports up to 3840×2160 with gentler sustained-slow-frame scaling. The launch screen shows the logo and a focused Play button.
 - Release audit scans nested archives, rejects incomplete scans and unsafe members, and limits public keys to their exact release configuration slots.

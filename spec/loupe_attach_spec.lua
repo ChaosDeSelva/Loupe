@@ -869,6 +869,23 @@ describe("loupe.attach", function()
         assertRecovered("bounds hook broke")
       end)
 
+      it("names a rebound toggle key in the alert", function()
+        -- A game that keeps F1 for itself must not be told to press it.
+        loupe.watch({ crate = { x = 1, y = 1 } }, "level")
+        loupe.attach({
+          open = true,
+          keys = { toggle = "f3" },
+          bounds = function()
+            error("bounds hook broke")
+          end,
+        })
+        love.draw()
+        clearCalls()
+        love.draw()
+        assert.is_true(drewText("F3 to reopen"))
+        assert.is_false(drewText("F1"))
+      end)
+
       it("catches a throwing toWorld hook", function()
         loupe.attach({
           open = true,

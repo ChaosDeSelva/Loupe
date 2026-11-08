@@ -393,14 +393,15 @@ saved overrides and the hot-reload check each run inside an error boundary. When
 - the error and its traceback are printed to the console as `loupe: <error>`, once (not again
   until you reopen the overlay);
 - the overlay closes and the corner badge shows "loupe hit an error (see console) - F1 to
-  reopen";
+  reopen" (naming your `keys.toggle` if you changed it);
 - the game's own `love.update` and `love.draw` still run that frame, and the game carries on;
 - loupe's windows are rebuilt, so window positions and open tree nodes reset;
 - if the hot-reload check failed, hot reload turns off for the rest of the session.
 
-Press F1 to reopen. If the cause is still there, the overlay closes again. Input callbacks
-(`keypressed`, `mousepressed`, ...) only route events and aren't inside the boundary. Errors in
-your own callbacks are never caught: they reach LÖVE as usual, with your traceback intact.
+Press the toggle key (F1 unless `keys.toggle` changes it; the badge names it) to reopen. If the
+cause is still there, the overlay closes again. Input callbacks (`keypressed`, `mousepressed`,
+...) only route events and aren't inside the boundary. Errors in your own callbacks are never
+caught: they reach LÖVE as usual, with your traceback intact.
 
 ## Headless runs
 

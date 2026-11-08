@@ -181,7 +181,9 @@ local function guard(fn)
     print("loupe: " .. err)
   end
   state.open = false
-  state.alert = "Loupe hit an error (see console) - F1 to reopen"
+  state.alert = ("Loupe hit an error (see console) - %s to reopen"):format(
+    state.keys.toggle:upper()
+  )
   -- The error may have left UI state half-built (a window never ended).
   state.ui, state.inspector, state.picker = newUi(), inspector.new(), picker.new()
   state.scale = nil -- the new context needs the theme and fonts applied again
